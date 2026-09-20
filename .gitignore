@@ -1,0 +1,42 @@
+# Binaries
+/bin/
+cmd/traffic-gen/traffic-gen
+*.exe
+*.test
+*.out
+*.so
+*.dylib
+
+# Go
+vendor/
+go.work
+go.work.sum
+*.prof
+*.pprof
+coverage.out
+coverage.txt
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-*
+
+# Local configs / secrets
+*.local.yaml
+*.local.yml
+.env
+.env.*
+
+# Large test data
+testdata/cicids2017/*.csv
+testdata/pcap/*.pcap
+testdata/pcap/*.pcapng
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
