@@ -14,9 +14,11 @@ is supported with security fixes.
 
 Please do not open a public issue for security vulnerabilities.
 
-Instead, send an email to:
+Use GitHub's private vulnerability reporting:
 
-    qupqy@mail.ru
+1. Go to the "Security" tab of this repository.
+2. Click "Report a vulnerability".
+3. Fill in the details.
 
 You will receive an acknowledgment within 72 hours. If the report is
 valid, a fix will be prepared and released as soon as reasonably
@@ -29,7 +31,7 @@ A good report usually contains:
 
 - A short description of the vulnerability and its impact.
 - Steps to reproduce, ideally with a minimal example.
-- The version of traffic-gen you are running (`./bin/traffic-gen --version`).
+- The version of traffic-gen you are running (./bin/traffic-gen --version).
 - Any relevant logs, packet captures, or configuration files.
 - If you have one, a suggested fix or mitigation.
 
@@ -46,7 +48,7 @@ It does not cover:
   to the relevant project.
 - Misuse of the tool. Running traffic-gen against systems you do not
   own or have permission to test is illegal, and the project takes
-  no responsibility for it. See the Legal section below.
+  no responsibility for it.
 
 ## Legal
 

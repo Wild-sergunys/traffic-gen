@@ -23,6 +23,10 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.13.2
