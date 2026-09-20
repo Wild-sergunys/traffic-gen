@@ -1,46 +1,61 @@
+version: "2"
 run:
-  timeout: 3m
-  tests: true
   go: "1.26"
-
+  tests: true
 linters:
-  disable-all: true
+  default: none
   enable:
+    - bodyclose
+    - contextcheck
     - errcheck
-    - gosimple
+    - errorlint
+    - gocritic
     - govet
     - ineffassign
-    - staticcheck
-    - unused
-    - gofmt
-    - goimports
     - misspell
-    - revive
-    - gocritic
-    - bodyclose
-    - errorlint
     - noctx
-    - contextcheck
+    - prealloc
+    - revive
+    - staticcheck
     - unconvert
     - unparam
-    - prealloc
-
-linters-settings:
-  revive:
+    - unused
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+    revive:
+      rules:
+        - name: exported
+        - name: var-naming
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      - name: exported
-      - name: var-naming
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-      - performance
-
+      - linters:
+          - errcheck
+          - unparam
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-        - unparam
   max-issues-per-linter: 0
   max-same-issues: 0
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
