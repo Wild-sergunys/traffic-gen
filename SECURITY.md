@@ -31,7 +31,7 @@ A good report usually contains:
 
 - A short description of the vulnerability and its impact.
 - Steps to reproduce, ideally with a minimal example.
-- The version of traffic-gen you are running (./bin/traffic-gen --version).
+- The version of traffic-gen you are running.
 - Any relevant logs, packet captures, or configuration files.
 - If you have one, a suggested fix or mitigation.
 
