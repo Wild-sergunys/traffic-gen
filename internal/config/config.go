@@ -15,10 +15,11 @@ import (
 const (
 	minWorkers = 1
 	maxWorkers = 1000
+	maxRPS     = 10_000_000
 )
 
 // Sentinel errors returned by Parse and Validate. Callers can match
-// them with errors. Is to distinguish between different failures.
+// them with errors.Is to distinguish between different failures.
 var (
 	ErrHelpRequested  = errors.New("help requested")
 	ErrTargetRequired = errors.New("target is required (use --target)")
@@ -28,6 +29,12 @@ var (
 	ErrDurationBad    = errors.New("duration must be positive")
 	ErrExtraArgs      = errors.New("unexpected extra arguments")
 
+	// ErrRPSRange is built with fmt.Errorf because the message embeds
+	// the maxRPS constant.
+	ErrRPSRange = fmt.Errorf("rps must not exceed %d", maxRPS)
+
+	// ErrWorkersRange is built with fmt.Errorf because the message
+	// embeds the minWorkers and maxWorkers constants.
 	ErrWorkersRange = fmt.Errorf(
 		"workers must be between %d and %d", minWorkers, maxWorkers,
 	)
@@ -110,6 +117,9 @@ func (c *Config) Validate() error {
 
 	if c.RPS < 0 {
 		return ErrRPSNegative
+	}
+	if c.RPS > maxRPS {
+		return ErrRPSRange
 	}
 
 	if c.Duration <= 0 {
