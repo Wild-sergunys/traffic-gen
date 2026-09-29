@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"testing"
@@ -267,4 +268,22 @@ func TestConfigValidateDirect(t *testing.T) {
 			t.Errorf("got err = %v, want = %v", err, config.ErrTargetInvalid)
 		}
 	})
+}
+
+// TestUsage verifies that the exported Usage helper writes a
+// description for every supported flag.
+func TestUsage(t *testing.T) {
+	var buf bytes.Buffer
+	config.Usage(&buf)
+
+	out := buf.String()
+	if out == "" {
+		t.Fatal("usage output is empty")
+	}
+
+	for _, flag := range []string{"target", "mode", "rps", "duration", "workers", "dry-run"} {
+		if !strings.Contains(out, "-"+flag) {
+			t.Errorf("usage output does not mention -%s", flag)
+		}
+	}
 }

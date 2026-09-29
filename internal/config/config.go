@@ -58,20 +58,26 @@ func Parse() (*Config, error) {
 	return ParseArgs(os.Args[1:])
 }
 
-// ParseArgs reads configuration from the given arguments and returns
-// a validated Config. Callers that receive ErrHelpRequested should
-// print usage and exit with status 0.
-func ParseArgs(args []string) (*Config, error) {
-	fs := flag.NewFlagSet("traffic-gen", flag.ContinueOnError)
-	fs.SetOutput(io.Discard) // errors are reported by the caller
-
-	var cfg Config
+// registerFlags declares all command-line flags on the given FlagSet.
+// It is shared by ParseArgs and Usage to keep the definitions in one place.
+func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.StringVar(&cfg.Target, "target", "", "Target URL (e.g. http://192.168.1.10)")
 	fs.StringVar(&cfg.Mode, "mode", "http1", "Generation mode: http1 | http2")
 	fs.IntVar(&cfg.RPS, "rps", 100, "Target requests per second (0 = unlimited)")
 	fs.DurationVar(&cfg.Duration, "duration", 30*time.Second, "Duration of the run")
 	fs.IntVar(&cfg.Workers, "workers", 10, "Number of concurrent workers")
 	fs.BoolVar(&cfg.DryRun, "dry-run", false, "Log what would be sent without sending")
+}
+
+// ParseArgs reads configuration from the given arguments and returns
+// a validated Config. Callers that receive ErrHelpRequested should call
+// Usage to print help text, then exit with status 0.
+func ParseArgs(args []string) (*Config, error) {
+	fs := flag.NewFlagSet("traffic-gen", flag.ContinueOnError)
+	fs.SetOutput(io.Discard) // errors are reported by the caller
+
+	var cfg Config
+	registerFlags(fs, &cfg)
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -89,6 +95,15 @@ func ParseArgs(args []string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// Usage writes the flag help text to w. Call this when ParseArgs
+// returns ErrHelpRequested.
+func Usage(w io.Writer) {
+	fs := flag.NewFlagSet("traffic-gen", flag.ContinueOnError)
+	fs.SetOutput(w)
+	registerFlags(fs, &Config{})
+	fs.PrintDefaults()
 }
 
 // Validate checks that the configuration is sensible.
