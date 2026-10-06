@@ -1,9 +1,18 @@
 package metrics
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
 	"sync/atomic"
 	"time"
 )
+
+// ErrWriteSnapshot is written to stderr when a snapshot write fails.
+
+var ErrWriteSnapshot = errors.New("snapshot cannot be written")
 
 // Metrics collects atomic counters for a traffic generation run.
 // Workers only call Record; a reporter goroutine reads snapshots.
@@ -54,4 +63,28 @@ func (m *Metrics) Snapshot() Snapshot {
 	}
 
 	return s
+}
+
+// Report writes a snapshot to w every interval until ctx is cancelled.
+// It blocks until ctx is done and does not print the final summary - main does.
+func (m *Metrics) Report(ctx context.Context, w io.Writer, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s := m.Snapshot()
+			_, err := fmt.Fprintf(
+				w, "sent=%v, errors=%v, bytes=%v, avg latency=%v\n",
+				s.Sent, s.Errors, s.Bytes, s.AvgLatency.Round(time.Millisecond),
+			)
+			// Error written in stderr, because w is broken.
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%v: %v\n", ErrWriteSnapshot, err)
+			}
+		}
+	}
 }
