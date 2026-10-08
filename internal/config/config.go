@@ -66,7 +66,7 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.IntVar(&cfg.RPS, "rps", 100, "Target requests per second (0 = unlimited)")
 	fs.DurationVar(&cfg.Duration, "duration", 30*time.Second, "Duration of the run")
 	fs.IntVar(&cfg.Workers, "workers", 10, "Number of concurrent workers")
-	fs.BoolVar(&cfg.DryRun, "dry-run", false, "Log what would be sent without sending")
+	fs.BoolVar(&cfg.DryRun, "dry-run", false, "Run the pipeline without sending any request")
 }
 
 // ParseArgs reads configuration from the given arguments and returns

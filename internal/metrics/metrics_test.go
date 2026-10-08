@@ -59,10 +59,12 @@ func TestMetrics(t *testing.T) {
 			}},
 		{
 			name: "one_error",
+			// The failed request runs 1s; counting it would skew the mean to
+			// 466ms. AvgLatency must average only the successful requests.
 			records: []Record{
 				{latency: 100 * time.Millisecond, nBytes: 300, err: nil},
 				{latency: 300 * time.Millisecond, nBytes: 280, err: nil},
-				{latency: 200 * time.Millisecond, nBytes: 0, err: errTestFail}},
+				{latency: time.Second, nBytes: 0, err: errTestFail}},
 			want: metrics.Snapshot{
 				Sent: 3, Errors: 1, Bytes: 580, AvgLatency: 200 * time.Millisecond,
 			}},

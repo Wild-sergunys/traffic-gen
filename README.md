@@ -31,11 +31,19 @@ binary, with reproducible scenarios instead of one-off attacks.
 
 ## Status
 
-Early development. The repository currently contains the project
-skeleton — build system, CI pipeline, code layout. The first working
-generator (HTTP/1.1) is in progress.
+Early development. The HTTP/1.1 generator works end to end: it drives
+traffic against a single target at a configurable rate, pools
+connections, counts sent/errors/bytes and average latency, treats
+4xx/5xx responses as errors, and supports a dry-run mode. HTTP/2,
+scenario files, and the port-scan and SYN-flood phases are not
+implemented yet.
 
-Nothing usable yet. Watch or star to follow along.
+## Usage
+
+    traffic-gen --target http://127.0.0.1:8080 --mode http1 --rps 100 --duration 30s
+
+All flags: `--target`, `--mode`, `--rps` (0 = unlimited), `--duration`,
+`--workers`, `--dry-run`. See `--help` for defaults.
 
 ## License
 
