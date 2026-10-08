@@ -64,11 +64,14 @@ func New(cfg *config.Config) (*Generator, error) {
 	}, nil
 }
 
-// newRequest builds a GET request against cfg.Target with a randomised
-// path and User-Agent so the stream does not look like a single client.
+// newRequest builds a GET request against cfg.Target. An explicit path
+// in cfg.Target is left untouched; with no path (or just "/") the path is
+// randomised so the stream does not look like a single client.
 func (g *Generator) newRequest(ctx context.Context) (*http.Request, error) {
 	u := *g.target
-	u.Path = randomPath()
+	if u.Path == "" || u.Path == "/" {
+		u.Path = randomPath()
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), http.NoBody)
 	if err != nil {

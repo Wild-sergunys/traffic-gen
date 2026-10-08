@@ -45,6 +45,11 @@ implemented yet.
 All flags: `--target`, `--mode`, `--rps` (0 = unlimited), `--duration`,
 `--workers`, `--dry-run`. See `--help` for defaults.
 
+An explicit path in `--target` is sent as-is; without one, every request
+uses a random path so the stream does not look like a single client.
+Servers that only serve known paths will answer the randomised requests
+with 404, which counts as an error — pass an explicit path in that case.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
