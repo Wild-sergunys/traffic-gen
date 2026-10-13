@@ -79,10 +79,16 @@ are counted as request errors.
 RPS is a target, not a guaranteed achieved rate: server latency and the
 available workers can limit throughput.
 
-An explicit path other than `/` is preserved. An empty path or `/` is
-replaced with a random path for every request. User-Agent values are
-selected from a fixed pool. If your server only serves known paths,
-specify one: random paths may return 404, which counts as an error.
+An explicit path, including `/`, and query parameters are preserved.
+For example, `--target 'http://127.0.0.1:8080/?device=7'` sends that path
+and query unchanged. Quote URLs containing shell-special characters
+such as `&`. A random path is generated only when both the path and
+query are empty. If your server only serves known paths, specify one
+instead of generating random paths.
+
+Each worker selects a User-Agent from a fixed pool once and keeps it
+for the entire run. Workers share the transport and connection pool;
+they do not represent independent browser sessions.
 
 Ctrl+C or SIGTERM cancels the run and in-flight requests, then prints the
 final summary. Dry-run follows the same duration and rate settings but
@@ -93,11 +99,21 @@ leaves all request counters at zero.
 Metrics are printed every two seconds and once at the end:
 
 - `sent`: completed request attempts, including failed attempts.
-- `errors`: failed attempts, including HTTP 4xx/5xx responses.
-- `bytes`: response body bytes from successful attempts; excludes headers
-  and protocol overhead.
-- `avg latency`: mean duration of successful attempts, including reading
-  the response body, displayed rounded to milliseconds.
+- `errors`: request construction, connection, TLS, transfer, or response
+  body read failures. HTTP 4xx/5xx status codes alone are not errors.
+- `2xx`, `3xx`, `4xx`, `5xx`: response counts by HTTP status class. A
+  received status is counted even if reading its body subsequently fails.
+- `bytes`: all response body bytes actually read, including partial bodies
+  on failed attempts; excludes headers and protocol overhead.
+- `avg latency`: mean duration of attempts whose response bodies were
+  fully read, including HTTP 4xx/5xx responses, displayed rounded to
+  milliseconds. Failed attempts are excluded; with no completed response,
+  the value is zero.
+
+Status counts and errors can overlap: a 200 response with a truncated
+body increments both `2xx` and `errors`. A connection failure has no
+response status. The HTTP client follows redirects by default, so status
+counts describe the final response rather than every redirect hop.
 
 Requests cancelled when the run ends can increase the error count.
 Request errors currently appear only in the counters; they do not make

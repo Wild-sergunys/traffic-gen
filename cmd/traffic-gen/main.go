@@ -55,7 +55,9 @@ func main() {
 	wg.Wait()
 
 	s := m.Snapshot()
-	fmt.Printf("final: sent=%d, errors=%d, bytes=%d, avg latency=%v, run time=%v\n", s.Sent, s.Errors, s.Bytes, s.AvgLatency.Round(time.Millisecond), time.Since(start))
+	fmt.Printf("final: sent=%d, errors=%d, 2xx=%v, 3xx=%v, 4xx=%v, 5xx=%v, bytes=%d, avg latency=%v, run time=%v\n",
+		s.Sent, s.Errors, s.StatusClasses[0], s.StatusClasses[1], s.StatusClasses[2], s.StatusClasses[3], s.Bytes,
+		s.AvgLatency.Round(time.Millisecond), time.Since(start))
 	if cfg.DryRun {
 		fmt.Println("dry-run: no traffic sent")
 	}
