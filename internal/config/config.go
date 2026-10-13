@@ -21,13 +21,15 @@ const (
 // Sentinel errors returned by Parse and Validate. Callers can match
 // them with errors.Is to distinguish between different failures.
 var (
-	ErrHelpRequested  = errors.New("help requested")
-	ErrTargetRequired = errors.New("target is required (use --target)")
-	ErrTargetInvalid  = errors.New("target must be a valid http:// or https:// URL")
-	ErrModeInvalid    = errors.New("mode must be one of: http1, http2")
-	ErrRPSNegative    = errors.New("rps cannot be negative")
-	ErrDurationBad    = errors.New("duration must be positive")
-	ErrExtraArgs      = errors.New("unexpected extra arguments")
+	ErrHelpRequested      = errors.New("help requested")
+	ErrTargetRequired     = errors.New("target is required (use --target)")
+	ErrTargetInvalid      = errors.New("target must be a valid http:// or https:// URL")
+	ErrModeInvalid        = errors.New("mode must be one of: http1, http2, h2c")
+	ErrInvalidTargetHTTP2 = errors.New("mode http2 requires an https:// target")
+	ErrInvalidTargetH2C   = errors.New("mode h2c requires an http:// target")
+	ErrRPSNegative        = errors.New("rps cannot be negative")
+	ErrDurationBad        = errors.New("duration must be positive")
+	ErrExtraArgs          = errors.New("unexpected extra arguments")
 
 	// ErrRPSRange is built with fmt.Errorf because the message embeds
 	// the maxRPS constant.
@@ -62,7 +64,7 @@ func Parse() (*Config, error) {
 // It is shared by ParseArgs and Usage to keep the definitions in one place.
 func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.StringVar(&cfg.Target, "target", "", "Target URL (e.g. http://192.168.1.10)")
-	fs.StringVar(&cfg.Mode, "mode", "http1", "Generation mode: http1 | http2")
+	fs.StringVar(&cfg.Mode, "mode", "http1", "Generation mode: http1 | http2 | h2c")
 	fs.IntVar(&cfg.RPS, "rps", 100, "Target requests per second (0 = unlimited)")
 	fs.DurationVar(&cfg.Duration, "duration", 30*time.Second, "Duration of the run")
 	fs.IntVar(&cfg.Workers, "workers", 10, "Number of concurrent workers")
@@ -124,8 +126,16 @@ func (c *Config) Validate() error {
 	}
 
 	switch c.Mode {
-	case "http1", "http2":
+	case "http1":
 		// ok
+	case "http2":
+		if u.Scheme != "https" {
+			return fmt.Errorf("%w: got %q", ErrInvalidTargetHTTP2, c.Target)
+		}
+	case "h2c":
+		if u.Scheme != "http" {
+			return fmt.Errorf("%w: got %q", ErrInvalidTargetH2C, c.Target)
+		}
 	default:
 		return fmt.Errorf("%w: got %q", ErrModeInvalid, c.Mode)
 	}

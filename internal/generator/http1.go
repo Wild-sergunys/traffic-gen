@@ -14,7 +14,7 @@ import (
 	"github.com/wild-sergunys/traffic-gen/internal/metrics"
 )
 
-// Generator sends HTTP/1.1 requests to a single target.
+// Generator sends HTTP/1.1, HTTP/2 and h2c requests to a single target.
 type Generator struct {
 	cfg    *config.Config
 	target *url.URL
@@ -32,9 +32,17 @@ var userAgents = []string{
 }
 
 // New prepares the target for the given validated config.
-// It returns an error if the mode is not implemented yet.
 func New(cfg *config.Config) (*Generator, error) {
-	if cfg.Mode != "http1" {
+	var protocol http.Protocols
+
+	switch cfg.Mode {
+	case "http1":
+		protocol.SetHTTP1(true)
+	case "http2":
+		protocol.SetHTTP2(true)
+	case "h2c":
+		protocol.SetUnencryptedHTTP2(true)
+	default:
 		return nil, fmt.Errorf("generator: mode %q not implemented", cfg.Mode)
 	}
 
@@ -50,6 +58,7 @@ func New(cfg *config.Config) (*Generator, error) {
 		target: u,
 		client: &http.Client{
 			Transport: &http.Transport{
+				Protocols: &protocol,
 				// The pool is sized to the worker count: with the default
 				// of two idle connections per host, most workers reopen a
 				// connection on every request.
