@@ -2,7 +2,12 @@ package generator
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
@@ -198,6 +203,209 @@ func TestNew(t *testing.T) {
 
 			if g.target.String() != tt.target {
 				t.Errorf("target = %q, want: target = %q", g.target.String(), tt.target)
+			}
+		})
+	}
+}
+
+// TestSend verifies response byte counts and status codes, including HTTP error statuses.
+func TestSend(t *testing.T) {
+	tests := []struct {
+		name             string
+		serverStatus     int
+		body             string
+		wantServerStatus int
+		wantBodyLen      int64
+	}{
+		{
+			name: "status_200", serverStatus: 200, body: "hello", wantServerStatus: 200, wantBodyLen: 5,
+		},
+		{
+			name: "status_404", serverStatus: 404, body: "not found", wantServerStatus: 404, wantBodyLen: 9,
+		},
+		{
+			name: "status_503", serverStatus: 503, body: "unavailable", wantServerStatus: 503, wantBodyLen: 11,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.serverStatus)
+				io.WriteString(w, tt.body)
+			}))
+			t.Cleanup(server.Close)
+
+			g, err := New(&config.Config{Target: server.URL + "/", Mode: "http1",
+				Workers: 1, Duration: time.Second})
+			if err != nil {
+				t.Fatalf("New cannot create Generator: %v", err)
+			}
+
+			ctx := context.Background()
+			bodyBytes, statusCode, err := g.send(ctx, "UA-test")
+
+			if err != nil {
+				t.Fatalf("cannot send request: %v", err)
+			}
+
+			if statusCode != tt.wantServerStatus {
+				t.Errorf("status = %v, want: status = %v", statusCode, tt.wantServerStatus)
+			}
+
+			if bodyBytes != tt.wantBodyLen {
+				t.Errorf("bodyBytes = %v, want: bodyBytes = %v", bodyBytes, tt.wantBodyLen)
+			}
+		})
+	}
+}
+
+// TestSendCanceled verifies that a pre-canceled request returns no bytes or status.
+func TestSendCanceled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(404)
+		io.WriteString(w, "not found")
+	}))
+	t.Cleanup(server.Close)
+
+	g, err := New(&config.Config{Target: server.URL + "/", Mode: "http1",
+		Workers: 1, Duration: time.Second})
+	if err != nil {
+		t.Fatalf("New cannot create Generator: %v", err)
+	}
+
+	ctx := context.Background()
+	ctx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	bodyBytes, statusCode, err := g.send(ctx, "UA-test")
+
+	if statusCode != 0 {
+		t.Errorf("status = %v, want: status = %v", statusCode, 0)
+	}
+
+	if bodyBytes != 0 {
+		t.Errorf("bodyBytes = %v, want: bodyBytes = %v", bodyBytes, 0)
+	}
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got: err %v, want: %v", err, context.Canceled)
+	}
+}
+
+// TestSendTruncatedBody verifies that a read failure preserves partial bytes and status.
+func TestSendTruncatedBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Advertise more bytes than we send to force an unexpected EOF.
+		w.Header().Set("Content-Length", "20")
+		w.WriteHeader(200)
+		io.WriteString(w, "hello")
+
+	}))
+	t.Cleanup(server.Close)
+
+	g, err := New(&config.Config{Target: server.URL + "/", Mode: "http1",
+		Workers: 1, Duration: time.Second})
+	if err != nil {
+		t.Fatalf("New cannot create Generator: %v", err)
+	}
+
+	ctx := context.Background()
+
+	bodyBytes, statusCode, err := g.send(ctx, "UA-test")
+
+	if statusCode != 200 {
+		t.Errorf("status = %v, want: status = %v", statusCode, 200)
+	}
+
+	if bodyBytes != 5 {
+		t.Errorf("bodyBytes = %v, want: bodyBytes = %v", bodyBytes, 5)
+	}
+
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("got: err %v, want: %v", err, io.ErrUnexpectedEOF)
+	}
+}
+
+// TestSendProtocols verifies the protocol observed by the server in each mode.
+func TestSendProtocols(t *testing.T) {
+	tests := []struct {
+		name      string
+		mode      string
+		tls       bool
+		wantProto string
+	}{
+		{name: "http1", mode: "http1", tls: false, wantProto: "HTTP/1.1"},
+		{name: "http2", mode: "http2", tls: true, wantProto: "HTTP/2.0"},
+		{name: "h2c", mode: "h2c", tls: false, wantProto: "HTTP/2.0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Buffer the observation so the handler can finish before send returns.
+			ch := make(chan string, 1)
+
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(200)
+				ch <- r.Proto
+				io.WriteString(w, "hello")
+			}))
+			t.Cleanup(server.Close)
+
+			switch tt.mode {
+			case "http1":
+				server.Start()
+			case "http2":
+				server.EnableHTTP2 = true
+				server.StartTLS()
+			case "h2c":
+				var proto http.Protocols
+				proto.SetUnencryptedHTTP2(true)
+				server.Config.Protocols = &proto
+				server.Start()
+			default:
+				t.Fatal("invalid mode in test data")
+			}
+
+			g, err := New(&config.Config{Target: server.URL + "/", Mode: tt.mode,
+				Workers: 1, Duration: time.Second})
+			if err != nil {
+				t.Fatalf("New cannot create Generator: %v", err)
+			}
+			t.Cleanup(g.client.CloseIdleConnections)
+
+			if tt.tls {
+				// Trust the local certificate while retaining normal TLS verification.
+				pool := x509.NewCertPool()
+				pool.AddCert(server.Certificate())
+
+				transport, ok := g.client.Transport.(*http.Transport)
+				if !ok {
+					t.Fatal("transport is not *http.Transport")
+				}
+
+				transport.TLSClientConfig = &tls.Config{RootCAs: pool}
+			}
+
+			ctx := context.Background()
+
+			bodyBytes, statusCode, err := g.send(ctx, "UA-test")
+
+			if err != nil {
+				t.Fatalf("got: err %v, want: %v", err, nil)
+			}
+
+			if statusCode != 200 {
+				t.Errorf("status = %v, want: status = %v", statusCode, 200)
+			}
+
+			if bodyBytes != 5 {
+				t.Errorf("bodyBytes = %v, want: bodyBytes = %v", bodyBytes, 5)
+			}
+
+			proto := <-ch
+			if proto != tt.wantProto {
+				t.Fatalf("proto = %v, want: proto = %v", proto, tt.wantProto)
 			}
 		})
 	}
