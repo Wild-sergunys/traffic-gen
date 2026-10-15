@@ -11,10 +11,12 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/wild-sergunys/traffic-gen/internal/config"
+	"github.com/wild-sergunys/traffic-gen/internal/metrics"
 )
 
 // TestNewRequest verifies that explicit paths, queries and user agents are preserved.
@@ -406,6 +408,121 @@ func TestSendProtocols(t *testing.T) {
 			proto := <-ch
 			if proto != tt.wantProto {
 				t.Fatalf("proto = %v, want: proto = %v", proto, tt.wantProto)
+			}
+		})
+	}
+}
+
+// TestWork verifies metrics for completed and canceled requests and ensures dry-run sends no traffic.
+func TestWork(t *testing.T) {
+	tests := []struct {
+		name              string
+		serverStatus      int
+		body              string
+		cancelContext     bool
+		dryRun            bool
+		wantSend          int64
+		wantErrors        int64
+		wantBytes         int64
+		wantStatusClasses [4]int64 // pos of classes: [2xx, 3xx, 4xx, 5xx]
+	}{
+		{
+			name:              "200",
+			serverStatus:      200,
+			body:              "hello",
+			cancelContext:     false,
+			dryRun:            false,
+			wantSend:          1,
+			wantErrors:        0,
+			wantBytes:         5,
+			wantStatusClasses: [4]int64{0: 1},
+		},
+		{
+			name:              "503",
+			serverStatus:      503,
+			body:              "unavailable",
+			cancelContext:     false,
+			dryRun:            false,
+			wantSend:          1,
+			wantErrors:        0,
+			wantBytes:         11,
+			wantStatusClasses: [4]int64{3: 1},
+		},
+		{
+			name:              "ctx_done",
+			serverStatus:      200,
+			body:              "hello",
+			cancelContext:     true,
+			dryRun:            false,
+			wantSend:          1,
+			wantErrors:        1,
+			wantBytes:         0,
+			wantStatusClasses: [4]int64{},
+		},
+		{
+			name:              "dry_run",
+			serverStatus:      200,
+			body:              "hello",
+			cancelContext:     false,
+			dryRun:            true,
+			wantSend:          0,
+			wantErrors:        0,
+			wantBytes:         0,
+			wantStatusClasses: [4]int64{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var serverRequests atomic.Int32
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+
+			if tt.cancelContext {
+				cancel()
+			}
+
+			m := &metrics.Metrics{}
+
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.serverStatus)
+				io.WriteString(w, tt.body)
+				serverRequests.Add(1)
+			}))
+			t.Cleanup(server.Close)
+
+			server.Start()
+
+			g, err := New(&config.Config{Target: server.URL + "/", Mode: "http1",
+				Workers: 1, Duration: time.Second, DryRun: tt.dryRun})
+			if err != nil {
+				t.Fatalf("New cannot create Generator: %v", err)
+			}
+
+			g.work(ctx, m, "UA-test")
+
+			s := m.Snapshot()
+
+			if s.Sent != tt.wantSend {
+				t.Errorf("send = %v, want: send = %v", s.Sent, tt.wantSend)
+			}
+
+			if s.Errors != tt.wantErrors {
+				t.Errorf("errors = %v, want: errors = %v", s.Errors, tt.wantErrors)
+			}
+
+			if s.Bytes != tt.wantBytes {
+				t.Errorf("bytes = %v, want: bytes = %v", s.Bytes, tt.wantBytes)
+			}
+
+			if s.StatusClasses != tt.wantStatusClasses {
+				t.Errorf("%+v, want: %+v", s.StatusClasses, tt.wantStatusClasses)
+			}
+
+			if tt.serverStatus >= 200 && tt.serverStatus <= 599 {
+				if int64(serverRequests.Load()) != tt.wantStatusClasses[(tt.serverStatus/100)-2] {
+					t.Errorf("server req = %v, want: server req = %v", serverRequests.Load(), tt.wantStatusClasses[tt.serverStatus/100-2])
+				}
 			}
 		})
 	}
