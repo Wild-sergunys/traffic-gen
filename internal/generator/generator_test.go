@@ -527,3 +527,61 @@ func TestWork(t *testing.T) {
 		})
 	}
 }
+
+// TestRunCanceled verifies that Run returns without recording attempts when its context is already canceled, with and without rate limiting.
+func TestRunCanceled(t *testing.T) {
+	tests := []struct {
+		name    string
+		rps     int
+		workers int
+	}{
+		{
+			name: "unlimited", rps: 0, workers: 3,
+		},
+		{
+			name: "limited", rps: 10, workers: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			m := metrics.Metrics{}
+			cfg := &config.Config{
+				Target:   "http://ex.com",
+				Mode:     "http1",
+				RPS:      tt.rps,
+				Duration: time.Second,
+				Workers:  tt.workers,
+				DryRun:   false,
+			}
+
+			g, err := New(cfg)
+			if err != nil {
+				t.Fatalf("cannot create new Generator: %v", err)
+			}
+
+			ch := make(chan struct{})
+
+			go func(ctx context.Context) {
+				ctxRun, cancelRun := context.WithCancel(ctx)
+				cancelRun()
+				g.Run(ctxRun, &m)
+				close(ch)
+			}(ctx)
+
+			select {
+			case <-ch:
+				want := metrics.Snapshot{}
+				s := m.Snapshot()
+				if s != want {
+					t.Errorf("snapshot = %+v, want: snapshot = %+v", s, want)
+				}
+			case <-ctx.Done():
+				t.Error("timeout exit")
+			}
+		})
+	}
+}
