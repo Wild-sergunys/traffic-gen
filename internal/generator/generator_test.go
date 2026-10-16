@@ -302,7 +302,6 @@ func TestSendTruncatedBody(t *testing.T) {
 		w.Header().Set("Content-Length", "20")
 		w.WriteHeader(200)
 		io.WriteString(w, "hello")
-
 	}))
 	t.Cleanup(server.Close)
 
@@ -582,6 +581,93 @@ func TestRunCanceled(t *testing.T) {
 			case <-ctx.Done():
 				t.Error("timeout exit")
 			}
+		})
+	}
+}
+
+// TestRunContextCancel verifies that canceling an active request stops Run and records a failed attempt, with and without rate limiting.
+func TestRunContextCancel(t *testing.T) {
+	tests := []struct {
+		name              string
+		rps               int
+		wantSend          int64
+		wantErrors        int64
+		wantStatusClasses [4]int64 // pos of classes: [2xx, 3xx, 4xx, 5xx]
+		wantBytes         int64
+	}{
+		{
+			name:              "rps_unlimited",
+			rps:               0,
+			wantSend:          1,
+			wantErrors:        1,
+			wantStatusClasses: [4]int64{},
+			wantBytes:         0,
+		},
+		{
+			name:              "rps_limited",
+			rps:               1,
+			wantSend:          1,
+			wantErrors:        1,
+			wantStatusClasses: [4]int64{},
+			wantBytes:         0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctxImit, imitationExit := context.WithCancel(context.Background())
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Cancel only after the server has received the request.
+				imitationExit()
+				select {
+				case <-r.Context().Done():
+				case <-ctx.Done():
+					// Let server cleanup finish even if request cancellation is broken.
+				}
+			}))
+			t.Cleanup(imitationExit)
+			t.Cleanup(server.Close)
+
+			defer cancel()
+			m := metrics.Metrics{}
+			cfg := &config.Config{
+				Target:   server.URL + "/",
+				Mode:     "http1",
+				RPS:      tt.rps,
+				Duration: time.Second,
+				Workers:  1,
+				DryRun:   false,
+			}
+
+			g, err := New(cfg)
+			if err != nil {
+				t.Fatalf("cannot create new Generator: %v", err)
+			}
+
+			ch := make(chan struct{})
+			go func() {
+				g.Run(ctxImit, &m)
+				defer close(ch)
+			}()
+
+			select {
+			case <-ch:
+				want := metrics.Snapshot{
+					Sent:          tt.wantSend,
+					Errors:        tt.wantErrors,
+					StatusClasses: tt.wantStatusClasses,
+					Bytes:         tt.wantBytes,
+					AvgLatency:    0,
+				}
+				s := m.Snapshot()
+				if s != want {
+					t.Errorf("snapshot = %+v, want: snapshot = %+v", s, want)
+				}
+			case <-ctx.Done():
+				t.Error("timeout exit")
+			}
+
 		})
 	}
 }
