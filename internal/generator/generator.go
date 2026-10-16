@@ -21,8 +21,7 @@ type Generator struct {
 	client *http.Client
 }
 
-// userAgents is a pool of real browser strings. A load stream that
-// always presents as Go-http-client/1.1 is a giveaway to an IDS.
+// userAgents contains browser strings selected once per worker.
 var userAgents = []string{
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
 	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
@@ -47,8 +46,6 @@ func New(cfg *config.Config) (*Generator, error) {
 	}
 
 	u, err := url.Parse(cfg.Target)
-	// cfg.Validate already parsed the target, so this cannot fail,
-	// but Go requires the error branch to be handled.
 	if err != nil {
 		return nil, err
 	}
@@ -59,23 +56,22 @@ func New(cfg *config.Config) (*Generator, error) {
 		client: &http.Client{
 			Transport: &http.Transport{
 				Protocols: &protocol,
-				// The pool is sized to the worker count: with the default
-				// of two idle connections per host, most workers reopen a
-				// connection on every request.
+				// Size the idle pool for the workers instead of the default
+				// limit of two idle connections per host.
 				MaxIdleConns:        cfg.Workers * 2,
 				MaxIdleConnsPerHost: cfg.Workers * 2,
 				IdleConnTimeout:     30 * time.Second,
-				// Compression is disabled so that bytes and CPU reflect
-				// the traffic actually sent over the wire.
+				// Disable automatic gzip negotiation and decompression;
+				// byte counts include response bodies only, not wire overhead.
 				DisableCompression: true,
 			},
 		},
 	}, nil
 }
 
-// newRequest builds a GET request against cfg.Target. An explicit path
-// in cfg.Target is left untouched; with neither a path nor a query the
-// path is randomised so the stream does not look like a single client.
+// newRequest builds a GET request against cfg.Target, preserving its path
+// and query. With neither a path nor a query, a random path is generated
+// for each request.
 func (g *Generator) newRequest(ctx context.Context, userAgent string) (*http.Request, error) {
 	u := *g.target
 	if u.Path == "" && u.RawQuery == "" {
@@ -121,9 +117,9 @@ func (g *Generator) send(ctx context.Context, userAgent string) (bodyBytes int64
 }
 
 // worker runs one goroutine of the pool until ctx is cancelled. Each
-// unit of work is a single request, recorded in m. In dry-run mode work
-// never sends. At rps == 0 work runs back-to-back, otherwise it is paced
-// by the tickets channel.
+// unit of live work is a request attempt recorded in m. Dry-run work
+// sends nothing and records no metrics. At rps == 0 work runs back-to-back;
+// otherwise it is paced by the tickets channel.
 func (g *Generator) worker(ctx context.Context, tickets <-chan time.Time, m *metrics.Metrics, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -167,9 +163,10 @@ func (g *Generator) work(ctx context.Context, m *metrics.Metrics, userAgent stri
 	m.Record(latency, sendBytes, statusCode, err)
 }
 
-// Run generates traffic until ctx is done. At rps > 0 a time.Ticker
-// feeds the ticket channel; rps == 0 runs the workers as fast as they
-// can.
+// Run generates traffic until ctx is done and waits for all workers
+// to finish. At rps > 0 one shared ticker paces all workers; ticks may
+// be dropped when workers cannot keep up. At rps == 0 workers run as fast
+// as they can. The caller controls the run duration through ctx.
 func (g *Generator) Run(ctx context.Context, m *metrics.Metrics) {
 	wg := sync.WaitGroup{}
 	var tickets <-chan time.Time

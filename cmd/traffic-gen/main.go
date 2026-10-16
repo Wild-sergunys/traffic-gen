@@ -1,5 +1,5 @@
 // Package main is the entry point of the traffic-gen tool, an HTTP/1.1
-// load generator that drives traffic against a single target.
+// and HTTP/2 load generator that drives traffic against a single target.
 package main
 
 import (

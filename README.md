@@ -28,8 +28,10 @@ Implemented:
 - Periodic metrics, a final summary, and context-based cancellation.
 - Dry-run mode, which builds requests without sending them.
 
-HTTP generator unit tests and HTTP/1.1 versus HTTP/2 benchmarks are
-pending. Configuration and metrics already have unit tests.
+Unit and local integration tests cover configuration, metrics, request
+construction, response handling, HTTP protocols, dry-run, and cancellation.
+A dedicated test of the shared RPS limit across multiple active workers
+is still pending.
 
 ## Build
 
@@ -71,13 +73,17 @@ are counted as request errors.
 |------|---------|---------|
 | `--target` | Required | Target URL |
 | `--mode` | `http1` | `http1`, `http2`, or `h2c` |
-| `--rps` | `100` | Target request rate across all workers; `0` means unlimited |
+| `--rps` | `100` | Target request rate across all workers, from 0 to 10,000,000; `0` means unlimited |
 | `--duration` | `30s` | Run duration |
 | `--workers` | `10` | Number of workers, from 1 to 1000 |
 | `--dry-run` | `false` | Build requests without sending them |
 
-RPS is a target, not a guaranteed achieved rate: server latency and the
-available workers can limit throughput.
+RPS is a target, not a guaranteed achieved rate. One shared ticker paces
+all workers; each tick permits one request attempt. Server latency, worker
+availability, and timer scheduling can reduce the achieved rate. Ticks may
+be dropped when workers cannot keep up; missed ticks are not accumulated
+for later replay. The accepted maximum is a configuration limit, not a
+throughput guarantee.
 
 An explicit path, including `/`, and query parameters are preserved.
 For example, `--target 'http://127.0.0.1:8080/?device=7'` sends that path
@@ -96,7 +102,12 @@ leaves all request counters at zero.
 
 ### Metrics
 
-Metrics are printed every two seconds and once at the end:
+Metrics are printed every two seconds and once at the end. During a run,
+counters are read independently, so a report may combine values from
+different instants. The final summary is read after all workers finish
+and no longer update the counters.
+
+The reported values are:
 
 - `sent`: completed request attempts, including failed attempts.
 - `errors`: request construction, connection, TLS, transfer, or response

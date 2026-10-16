@@ -16,23 +16,24 @@ var ErrWriteSnapshot = errors.New("snapshot cannot be written")
 // Metrics collects atomic counters for a traffic generation run.
 // Workers only call Record; a reporter goroutine reads snapshots.
 type Metrics struct {
-	sent          atomic.Int64    // attempts, including failed ones
+	sent          atomic.Int64    // completed attempts, including failed ones
 	errors        atomic.Int64    // failed attempts
 	bytes         atomic.Int64    // response body bytes received
-	latencySum    atomic.Int64    // sum of successful request latencies, ns
-	latencyCnt    atomic.Int64    // successful request latency samples
+	latencySum    atomic.Int64    // sum of latencies for attempts without errors, ns
+	latencyCnt    atomic.Int64    // latency samples for attempts without errors
 	statusClasses [4]atomic.Int64 // status code counter, order: 2xx, 3xx, 4xx, 5xx
 }
 
-// Snapshot holds a consistent read of the counters at the moment of the call.
-// AvgLatency is the arithmetic mean over successful requests only and is
-// zero when no success has been recorded yet.
+// Snapshot holds independently read counters. During concurrent recording,
+// fields may reflect different instants; after all Record calls finish, they
+// are consistent. AvgLatency includes only attempts recorded without errors,
+// including HTTP 4xx/5xx responses, and is zero when there are no such attempts.
 type Snapshot struct {
-	Sent          int64         // attempts, including failed ones
+	Sent          int64         // completed attempts, including failed ones
 	Errors        int64         // failed attempts
 	StatusClasses [4]int64      // order: 2xx, 3xx, 4xx, 5xx
 	Bytes         int64         // response body bytes received
-	AvgLatency    time.Duration // mean latency over successful requests
+	AvgLatency    time.Duration // mean latency over attempts without errors
 }
 
 // Record accounts for one completed request. It is safe for concurrent use.
@@ -56,7 +57,8 @@ func (m *Metrics) Record(latency time.Duration, nBytes int64, statusCode int, er
 	}
 }
 
-// Snapshot captures the current counter values. It is safe for concurrent use.
+// Snapshot reads counters independently. It is safe for concurrent use,
+// but the result is not an atomic snapshot of all counters.
 func (m *Metrics) Snapshot() Snapshot {
 	s := Snapshot{
 		Sent:   m.sent.Load(),
