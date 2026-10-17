@@ -92,6 +92,10 @@ such as `&`. A random path is generated only when both the path and
 query are empty. If your server only serves known paths, specify one
 instead of generating random paths.
 
+A password supplied as `user:password@host` in the target URL is masked in
+the configuration summary and target validation errors. The original target
+is retained for requests.
+
 Each worker selects a User-Agent from a fixed pool once and keeps it
 for the entire run. Workers share the transport and connection pool;
 they do not represent independent browser sessions.

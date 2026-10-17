@@ -116,10 +116,10 @@ func (c *Config) Validate() error {
 
 	u, err := url.Parse(c.Target)
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrTargetInvalid, err)
+		return ErrTargetInvalid
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("%w: unsupported scheme %q", ErrTargetInvalid, u.Scheme)
+		return fmt.Errorf("%w: unsupported scheme", ErrTargetInvalid)
 	}
 	if u.Hostname() == "" {
 		return fmt.Errorf("%w: missing host", ErrTargetInvalid)
@@ -130,11 +130,11 @@ func (c *Config) Validate() error {
 		// ok
 	case "http2":
 		if u.Scheme != "https" {
-			return fmt.Errorf("%w: got %q", ErrInvalidTargetHTTP2, c.Target)
+			return fmt.Errorf("%w: got %q", ErrInvalidTargetHTTP2, u.Redacted())
 		}
 	case "h2c":
 		if u.Scheme != "http" {
-			return fmt.Errorf("%w: got %q", ErrInvalidTargetH2C, c.Target)
+			return fmt.Errorf("%w: got %q", ErrInvalidTargetH2C, u.Redacted())
 		}
 	default:
 		return fmt.Errorf("%w: got %q", ErrModeInvalid, c.Mode)
@@ -165,8 +165,14 @@ func (c *Config) String() string {
 		rps = "unlimited"
 	}
 
+	u, err := url.Parse(c.Target)
+	urlHidden := "<invalid url>"
+	if err == nil {
+		urlHidden = u.Redacted()
+	}
+
 	return fmt.Sprintf(
 		"target=%s mode=%s rps=%s duration=%s workers=%d dry-run=%v",
-		c.Target, c.Mode, rps, c.Duration, c.Workers, c.DryRun,
+		urlHidden, c.Mode, rps, c.Duration, c.Workers, c.DryRun,
 	)
 }

@@ -287,3 +287,79 @@ func TestUsage(t *testing.T) {
 		}
 	}
 }
+
+// TestConfigTargetRedaction verifies that summaries and validation errors hide
+// passwords without changing the target used for requests.
+func TestConfigTargetRedaction(t *testing.T) {
+	const password = "test-password"
+
+	tests := []struct {
+		name       string
+		target     string
+		mode       string
+		wantTarget string
+		wantErr    error
+	}{
+		{
+			name:       "valid target",
+			target:     "http://alice:test-password@example.com/api?device=7",
+			mode:       "http1",
+			wantTarget: "http://alice:xxxxx@example.com/api?device=7",
+		},
+		{
+			name:       "http2 requires https",
+			target:     "http://alice:test-password@example.com/api?device=7",
+			mode:       "http2",
+			wantTarget: "http://alice:xxxxx@example.com/api?device=7",
+			wantErr:    config.ErrInvalidTargetHTTP2,
+		},
+		{
+			name:       "h2c requires http",
+			target:     "https://alice:test-password@example.com/api?device=7",
+			mode:       "h2c",
+			wantTarget: "https://alice:xxxxx@example.com/api?device=7",
+			wantErr:    config.ErrInvalidTargetH2C,
+		},
+		{
+			name:       "unparsable target",
+			target:     "http://alice:test-password@[invalid",
+			mode:       "http1",
+			wantTarget: "<invalid url>",
+			wantErr:    config.ErrTargetInvalid,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Target:   tt.target,
+				Mode:     tt.mode,
+				RPS:      100,
+				Duration: time.Second,
+				Workers:  1,
+			}
+
+			summary := cfg.String()
+			if !strings.Contains(summary, "target="+tt.wantTarget+" ") {
+				t.Errorf("summary = %q, want target %q", summary, tt.wantTarget)
+			}
+			if strings.Contains(summary, password) {
+				t.Errorf("summary exposes password: %q", summary)
+			}
+			if cfg.Target != tt.target {
+				t.Errorf("target after String = %q, want %q", cfg.Target, tt.target)
+			}
+
+			err := cfg.Validate()
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("Validate error = %v, want %v", err, tt.wantErr)
+			}
+			if err != nil && strings.Contains(err.Error(), password) {
+				t.Errorf("Validate error exposes password: %q", err.Error())
+			}
+			if cfg.Target != tt.target {
+				t.Errorf("target after Validate = %q, want %q", cfg.Target, tt.target)
+			}
+		})
+	}
+}
