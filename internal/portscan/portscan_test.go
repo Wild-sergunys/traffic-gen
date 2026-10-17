@@ -107,6 +107,8 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
+// TestRun checks result order, continuation after connection errors, and
+// pre-canceled contexts with and without pacing; it does not measure the rate.
 func TestRun(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -189,9 +191,9 @@ func TestRun(t *testing.T) {
 	}
 }
 
+// TestRunCanceledAfterFirstConnection checks cancellation after a connection
+// is accepted, without assuming Run has already entered its ticker wait.
 func TestRunCanceledAfterFirstConnection(t *testing.T) {
-	t.Skip("TODO: add cancellation synchronization and result assertions")
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -222,6 +224,7 @@ func TestRunCanceledAfterFirstConnection(t *testing.T) {
 		err error
 	}
 
+	// Buffer the result so the sender can finish if a test assertion exits early.
 	ch := make(chan chanResults, 1)
 	go func() {
 		res, err := Run(ctx, cfg)
@@ -229,6 +232,7 @@ func TestRunCanceledAfterFirstConnection(t *testing.T) {
 		ch <- chanRes
 	}()
 
+	// Bound Accept independently of the scan context.
 	listener := listeners[0].(*net.TCPListener)
 	if err := listener.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		t.Fatalf("cannot set listener deadline: %v", err)

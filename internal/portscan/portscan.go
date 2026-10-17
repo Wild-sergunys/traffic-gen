@@ -1,3 +1,4 @@
+// Package portscan performs sequential TCP connect scans of a single host.
 package portscan
 
 import (
@@ -12,22 +13,32 @@ import (
 	"unicode"
 )
 
+// Config defines the target, connection timeout, and scan pacing.
 type Config struct {
-	Host            string
-	Ports           []int
-	Timeout         time.Duration
+	// Host is a hostname or IP address without a scheme, port, or IPv6 brackets.
+	Host string
+	// Ports is a nonempty list of ports in scan order; duplicates are preserved.
+	Ports []int
+	// Timeout limits each connection attempt and must be positive.
+	Timeout time.Duration
+	// ProbesPerSecond sets ticker-based pacing; zero disables pacing.
+	// Slow connections and scheduling can reduce the actual rate.
 	ProbesPerSecond int
 }
 
+// Result describes one attempted TCP connection.
+// Err is nil only if both connecting and closing the connection succeeded.
 type Result struct {
 	Port int
 	Err  error
 }
 
 var (
+	// ErrInvalidConfig identifies invalid scan settings.
 	ErrInvalidConfig = errors.New("invalid config")
 )
 
+// probe connects and immediately closes without sending application data.
 func probe(ctx context.Context, address string, timeout time.Duration) error {
 	dialer := &net.Dialer{
 		Timeout: timeout,
@@ -46,6 +57,9 @@ func probe(ctx context.Context, address string, timeout time.Duration) error {
 	return nil
 }
 
+// Run validates cfg and probes its ports sequentially, starting the first immediately.
+// Probe errors are recorded in results and do not stop the scan. Cancellation
+// returns accumulated results, including any interrupted probe, and ctx.Err().
 func Run(ctx context.Context, cfg Config) ([]Result, error) {
 	var res []Result
 
@@ -70,6 +84,7 @@ func Run(ctx context.Context, cfg Config) ([]Result, error) {
 			}
 		}
 
+		// A ready ticket can be selected even when cancellation is also ready.
 		if ctx.Err() != nil {
 			return res, ctx.Err()
 		}
@@ -80,6 +95,8 @@ func Run(ctx context.Context, cfg Config) ([]Result, error) {
 	return res, ctx.Err()
 }
 
+// Validate checks scan settings without resolving names or contacting the target.
+// It checks host formatting, not the complete DNS hostname syntax.
 func (c Config) Validate() error {
 	if c.Host == "" {
 		return fmt.Errorf("%w: host cannot be empty", ErrInvalidConfig)
@@ -93,6 +110,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("%w: host cannot contain any %q", ErrInvalidConfig, "/?@#")
 	}
 
+	// Colons are valid in IPv6 addresses, but not in the hostname fallback.
 	if _, err := netip.ParseAddr(c.Host); err != nil {
 		if strings.Contains(c.Host, ":") {
 			return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
