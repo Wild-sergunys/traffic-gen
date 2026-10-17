@@ -100,6 +100,9 @@ Each worker selects a User-Agent from a fixed pool once and keeps it
 for the entire run. Workers share the transport and connection pool;
 they do not represent independent browser sessions.
 
+Workers check cancellation before each unit of work. If cancellation happens
+after that check, a live attempt may still start and is included in the metrics.
+
 Ctrl+C or SIGTERM cancels the run and in-flight requests, then prints the
 final summary. Dry-run follows the same duration and rate settings but
 leaves all request counters at zero.

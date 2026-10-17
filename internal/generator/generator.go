@@ -138,6 +138,9 @@ func (g *Generator) worker(ctx context.Context, tickets <-chan time.Time, m *met
 			case <-ctx.Done():
 				return
 			case <-tickets:
+				if ctx.Err() != nil {
+					return
+				}
 				g.work(ctx, m, ua)
 			}
 		}

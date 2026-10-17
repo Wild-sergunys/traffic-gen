@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -670,4 +671,53 @@ func TestRunContextCancel(t *testing.T) {
 
 		})
 	}
+}
+
+// TestWorkerCanceledWithReadyTicket verifies that workers with an already canceled
+// context record no attempts even when a ticket is available.
+func TestWorkerCanceledWithReadyTicket(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	var wg sync.WaitGroup
+	defer cancel()
+	m := metrics.Metrics{}
+	cfg := &config.Config{
+		Target:   "http://ex.com",
+		Mode:     "http1",
+		RPS:      10,
+		Duration: time.Second,
+		Workers:  32,
+		DryRun:   false,
+	}
+
+	g, err := New(cfg)
+	if err != nil {
+		t.Fatalf("cannot create new Generator: %v", err)
+	}
+
+	ch := make(chan struct{})
+	ticket := make(chan time.Time, 1)
+	ticket <- time.Now()
+	ctxRun, cancelRun := context.WithCancel(ctx)
+	cancelRun()
+
+	wg.Add(cfg.Workers)
+	for range cfg.Workers {
+		go g.worker(ctxRun, ticket, &m, &wg)
+	}
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	select {
+	case <-ch:
+		want := metrics.Snapshot{}
+		s := m.Snapshot()
+		if s != want {
+			t.Errorf("snapshot = %+v, want: snapshot = %+v", s, want)
+		}
+	case <-ctx.Done():
+		t.Error("timeout exit")
+	}
+
 }
