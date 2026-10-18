@@ -138,6 +138,11 @@ Request errors currently appear only in the counters; they do not make
 the process exit with a nonzero status. Invalid configuration and
 generator setup errors do produce a nonzero exit status.
 
+## Benchmarks
+
+See the [HTTP/1.1 and HTTP/2 benchmark report](docs/benchmarks/http-protocols.md)
+for the full-generator workload, reproduction command, results, and limitations.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

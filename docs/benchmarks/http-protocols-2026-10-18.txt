@@ -1,0 +1,26 @@
+goos: linux
+goarch: amd64
+pkg: github.com/wild-sergunys/traffic-gen/internal/generator
+cpu: 11th Gen Intel(R) Core(TM) i7-11800H @ 2.30GHz
+BenchmarkRun/http1_4w-4         	       1	10000070695 ns/op	         3.000 errors/run	     85738 req/s
+BenchmarkRun/http1_4w-4         	       1	10000035448 ns/op	         2.000 errors/run	     84331 req/s
+BenchmarkRun/http1_4w-4         	       1	10000068690 ns/op	         1.000 errors/run	     81254 req/s
+BenchmarkRun/http1_4w-4         	       1	10000058193 ns/op	         2.000 errors/run	     74715 req/s
+BenchmarkRun/http1_4w-4         	       1	10000061527 ns/op	         2.000 errors/run	     75345 req/s
+BenchmarkRun/http2_4w-4         	       1	10000025679 ns/op	         4.000 errors/run	     25629 req/s
+BenchmarkRun/http2_4w-4         	       1	10000048071 ns/op	         4.000 errors/run	     26462 req/s
+BenchmarkRun/http2_4w-4         	       1	10000062588 ns/op	         3.000 errors/run	     25652 req/s
+BenchmarkRun/http2_4w-4         	       1	10000066962 ns/op	         4.000 errors/run	     26075 req/s
+BenchmarkRun/http2_4w-4         	       1	10000044699 ns/op	         4.000 errors/run	     26303 req/s
+BenchmarkRun/http1_32w-4        	       1	10000280683 ns/op	        10.00 errors/run	     86798 req/s
+BenchmarkRun/http1_32w-4        	       1	10000379413 ns/op	        18.00 errors/run	     84871 req/s
+BenchmarkRun/http1_32w-4        	       1	10000309761 ns/op	         9.000 errors/run	     79553 req/s
+BenchmarkRun/http1_32w-4        	       1	10001124047 ns/op	        13.00 errors/run	     82432 req/s
+BenchmarkRun/http1_32w-4        	       1	10000787798 ns/op	         8.000 errors/run	     82507 req/s
+BenchmarkRun/http2_32w-4        	       1	10000172501 ns/op	        31.00 errors/run	     52396 req/s
+BenchmarkRun/http2_32w-4        	       1	10000216257 ns/op	        27.00 errors/run	     52390 req/s
+BenchmarkRun/http2_32w-4        	       1	10000108998 ns/op	        30.00 errors/run	     52730 req/s
+BenchmarkRun/http2_32w-4        	       1	10000217947 ns/op	        32.00 errors/run	     52468 req/s
+BenchmarkRun/http2_32w-4        	       1	10000095809 ns/op	        32.00 errors/run	     51958 req/s
+PASS
+ok  	github.com/wild-sergunys/traffic-gen/internal/generator	200.037s
