@@ -33,6 +33,29 @@ construction, response handling, HTTP protocols, dry-run, and cancellation.
 A dedicated test of the shared RPS limit across multiple active workers
 is still pending.
 
+## YAML configuration loader
+
+The config package provides `DecodeYAML(io.Reader)` and a validated `RunConfig`.
+See [examples/portscan.yaml](examples/portscan.yaml) for HTTP background traffic
+and one TCP connect-scan scenario. Either block may be omitted, but at least
+one must be present. The port expression preserves order and duplicates and
+expands inclusive ranges such as `8000-8010`.
+
+Defaults for omitted fields:
+
+- Run: `duration: 30s`, `dry_run: false`.
+- Background: `mode: http1`, `rps: 100`, `workers: 10`; `target` is required.
+- Port scan: `timeout: 1s`, `probes_per_second: 0`; `host` and `ports` are required.
+
+Explicit zero rates mean unlimited traffic; zero durations or worker counts
+are invalid. Durations and port expressions must be strings, rates and worker
+counts integers, and `dry_run` a boolean. Only one YAML document is accepted.
+Nulls, aliases, merge keys, duplicate keys, and unknown fields are rejected.
+
+This is a configuration-loading API. The CLI does not yet accept `--config`,
+and combined background/scenario execution is not connected. Existing HTTP
+flags continue to work.
+
 ## Build
 
 Requires Go 1.26.2 or newer and `make`.

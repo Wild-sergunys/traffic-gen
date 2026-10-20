@@ -1,0 +1,17 @@
+# Example input for config.DecodeYAML; --config is not connected to the CLI yet.
+duration: 30s
+dry_run: false
+
+background:
+  target: http://127.0.0.1:8080/
+  mode: http1
+  rps: 100
+  workers: 10
+
+scenario:
+  type: portscan
+  portscan:
+    host: 127.0.0.1
+    ports: "22,80,443,8000-8010"
+    timeout: 1s
+    probes_per_second: 20
