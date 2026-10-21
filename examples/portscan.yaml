@@ -1,4 +1,5 @@
-# Example input for config.DecodeYAML; --config is not connected to the CLI yet.
+# HTTP background and a TCP connect scan run concurrently.
+# Run: ./bin/traffic-gen --config examples/portscan.yaml
 duration: 30s
 dry_run: false
 

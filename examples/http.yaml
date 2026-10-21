@@ -1,0 +1,9 @@
+# Run: ./bin/traffic-gen --config examples/http.yaml
+duration: 30s
+dry_run: false
+
+background:
+  target: http://127.0.0.1:8080/health
+  mode: http1
+  rps: 100
+  workers: 10

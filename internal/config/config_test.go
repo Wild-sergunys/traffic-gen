@@ -281,7 +281,7 @@ func TestUsage(t *testing.T) {
 		t.Fatal("usage output is empty")
 	}
 
-	for _, flag := range []string{"target", "mode", "rps", "duration", "workers", "dry-run"} {
+	for _, flag := range []string{"target", "mode", "rps", "duration", "workers", "dry-run", "config"} {
 		if !strings.Contains(out, "-"+flag) {
 			t.Errorf("usage output does not mention -%s", flag)
 		}

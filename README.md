@@ -4,8 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/wild-sergunys/traffic-gen)](go.mod)
 
-HTTP/1.1 and HTTP/2 traffic generator for load testing and detector
-validation. Written in Go, with no external Go dependencies.
+HTTP/1.1 and HTTP/2 traffic generator with TCP connect scanning for load
+testing and IDS experiments. Written in Go; YAML configuration uses
+`go.yaml.in/yaml/v3`.
 
 ## Why
 
@@ -13,8 +14,8 @@ The project is being developed as a traffic source for IDS experiments.
 The goal is to generate normal traffic and attack scenarios with one
 tool, then replay the same scenarios against different detectors.
 
-The current implementation generates HTTP requests. Attack modes,
-multi-phase YAML scenarios, and PCAP replay are planned.
+The current implementation generates HTTP GET traffic and scans TCP ports.
+Additional attack scenarios and dataset-based traffic are planned.
 
 ## Status
 
@@ -26,20 +27,37 @@ Implemented:
   HTTP/2 without an HTTP/1.1 upgrade handshake.
 - A shared worker pool, configurable request rate, and connection reuse.
 - Periodic metrics, a final summary, and context-based cancellation.
-- Dry-run mode, which builds requests without sending them.
+- YAML configuration for HTTP traffic, one port scan, or both together.
+- Sequential TCP connect scanning with configurable ports, timeout, and pacing.
+- Dry-run mode without HTTP requests or scan connections.
 
 Unit and local integration tests cover configuration, metrics, request
-construction, response handling, HTTP protocols, dry-run, and cancellation.
-A dedicated test of the shared RPS limit across multiple active workers
-is still pending.
+construction, response handling, HTTP protocols, combined execution,
+dry-run, and cancellation.
 
-## YAML configuration loader
+## YAML configuration
 
-The config package provides `DecodeYAML(io.Reader)` and a validated `RunConfig`.
-See [examples/portscan.yaml](examples/portscan.yaml) for HTTP background traffic
-and one TCP connect-scan scenario. Either block may be omitted, but at least
-one must be present. The port expression preserves order and duplicates and
-expands inclusive ranges such as `8000-8010`.
+Build the binary, then select a configuration file:
+
+```sh
+./bin/traffic-gen --config examples/http.yaml
+./bin/traffic-gen --config examples/scan-only.yaml
+./bin/traffic-gen --config examples/portscan.yaml
+```
+
+The examples demonstrate [HTTP only](examples/http.yaml),
+[a port scan only](examples/scan-only.yaml), and
+[HTTP background with a port scan](examples/portscan.yaml). Adjust their
+addresses and ports for your test environment.
+
+Either `background` or `scenario` may be omitted, but at least one must be
+present. Only one scenario, `portscan`, is supported per run. The port expression
+preserves order and duplicates and expands inclusive ranges such as `8000-8010`.
+
+`--config` cannot be combined with HTTP flags, including `--duration` and
+`--dry-run`. Set those values in YAML when using a file. `--help` remains
+available without loading the file. Without `--config`, the HTTP flags below
+continue to work.
 
 Defaults for omitted fields:
 
@@ -52,9 +70,23 @@ are invalid. Durations and port expressions must be strings, rates and worker
 counts integers, and `dry_run` a boolean. Only one YAML document is accepted.
 Nulls, aliases, merge keys, duplicate keys, and unknown fields are rejected.
 
-This is a configuration-loading API. The CLI does not yet accept `--config`,
-and combined background/scenario execution is not connected. Existing HTTP
-flags continue to work.
+The top-level duration limits the entire run. HTTP background and the scan
+start independently; finishing the scan does not stop HTTP background. A
+scan-only run exits as soon as its port list is exhausted or the common limit
+is reached. `probes_per_second: 0` removes pacing; positive values pace
+connection attempts, starting the first immediately. Slow connections can
+reduce the achieved scan rate.
+
+Dry-run skips all network activity. With HTTP background enabled it still
+builds requests for the configured duration and keeps HTTP counters at zero.
+A scan-only dry-run validates the settings, prints the dry-run message, and
+exits without waiting for the duration.
+
+A scan summary reports `attempted`, `succeeded`, and `failed`. Success means
+connecting and closing completed without error; failures include refused
+connections, timeouts, and interrupted attempts. A failed attempt does not
+by itself establish that a port is closed. Individual failures do not stop
+the scan or make the process exit with an error.
 
 ## Build
 
@@ -67,7 +99,7 @@ make build
 
 ## Usage
 
-Each run sends GET requests to one target. Select the protocol explicitly:
+HTTP traffic sends GET requests to one target. Select the protocol explicitly:
 
 | Mode | Target scheme | Protocol |
 |------|---------------|----------|
@@ -94,7 +126,8 @@ are counted as request errors.
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--target` | Required | Target URL |
+| `--config` | Unset | YAML file; cannot be combined with HTTP settings flags |
+| `--target` | Required without `--config` | HTTP target URL |
 | `--mode` | `http1` | `http1`, `http2`, or `h2c` |
 | `--rps` | `100` | Target request rate across all workers, from 0 to 10,000,000; `0` means unlimited |
 | `--duration` | `30s` | Run duration |
@@ -115,9 +148,8 @@ such as `&`. A random path is generated only when both the path and
 query are empty. If your server only serves known paths, specify one
 instead of generating random paths.
 
-A password supplied as `user:password@host` in the target URL is masked in
-the configuration summary and target validation errors. The original target
-is retained for requests.
+Target validation errors omit or mask passwords supplied as
+`user:password@host` in the URL. The original target is retained for requests.
 
 Each worker selects a User-Agent from a fixed pool once and keeps it
 for the entire run. Workers share the transport and connection pool;
@@ -126,13 +158,14 @@ they do not represent independent browser sessions.
 Workers check cancellation before each unit of work. If cancellation happens
 after that check, a live attempt may still start and is included in the metrics.
 
-Ctrl+C or SIGTERM cancels the run and in-flight requests, then prints the
-final summary. Dry-run follows the same duration and rate settings but
-leaves all request counters at zero.
+Ctrl+C or SIGTERM cancels enabled tasks and in-flight operations, waits for
+background goroutines, and prints final summaries. Cancellation and the common
+time limit are normal completion, with exit status zero.
 
 ### Metrics
 
-Metrics are printed every two seconds and once at the end. During a run,
+When HTTP background is enabled, metrics are printed every two seconds and
+once at the end. Port scan results are printed after both tasks finish. During a run,
 counters are read independently, so a report may combine values from
 different instants. The final summary is read after all workers finish
 and no longer update the counters.
@@ -159,7 +192,8 @@ counts describe the final response rather than every redirect hop.
 Requests cancelled when the run ends can increase the error count.
 Request errors currently appear only in the counters; they do not make
 the process exit with a nonzero status. Invalid configuration and
-generator setup errors do produce a nonzero exit status.
+generator setup errors do produce a nonzero exit status, as do failures to
+write final summaries.
 
 ## Benchmarks
 

@@ -1,5 +1,5 @@
-// Package main is the entry point of the traffic-gen tool, an HTTP/1.1
-// and HTTP/2 load generator that drives traffic against a single target.
+// Package main starts HTTP traffic generation and port scanning from CLI flags
+// or a YAML configuration file, with shutdown on interrupt or SIGTERM.
 package main
 
 import (
@@ -8,17 +8,14 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
-	"time"
 
 	"github.com/wild-sergunys/traffic-gen/internal/config"
-	"github.com/wild-sergunys/traffic-gen/internal/generator"
-	"github.com/wild-sergunys/traffic-gen/internal/metrics"
+	"github.com/wild-sergunys/traffic-gen/internal/runner"
 )
 
 func main() {
-	cfg, err := config.Parse()
+	cfg, err := config.ParseRunArgs(os.Args[1:])
 	if err != nil {
 		if errors.Is(err, config.ErrHelpRequested) {
 			config.Usage(os.Stdout)
@@ -30,35 +27,13 @@ func main() {
 		}
 	}
 
-	fmt.Printf("config: %s\n", cfg.String())
-	m := &metrics.Metrics{}
-	g, err := generator.New(cfg)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+
+	err = runner.Run(ctx, cfg, os.Stdout)
+	stop()
+
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	ctx, cancel := context.WithTimeout(ctx, cfg.Duration)
-	defer cancel()
-
-	start := time.Now()
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		m.Report(ctx, os.Stdout, 2*time.Second)
-	}()
-
-	g.Run(ctx, m)
-	wg.Wait()
-
-	s := m.Snapshot()
-	fmt.Printf("final: sent=%d, errors=%d, 2xx=%v, 3xx=%v, 4xx=%v, 5xx=%v, bytes=%d, avg latency=%v, run time=%v\n",
-		s.Sent, s.Errors, s.StatusClasses[0], s.StatusClasses[1], s.StatusClasses[2], s.StatusClasses[3], s.Bytes,
-		s.AvgLatency.Round(time.Millisecond), time.Since(start))
-	if cfg.DryRun {
-		fmt.Println("dry-run: no traffic sent")
 	}
 }

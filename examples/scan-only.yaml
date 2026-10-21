@@ -1,0 +1,11 @@
+# Run: ./bin/traffic-gen --config examples/scan-only.yaml
+duration: 30s
+dry_run: false
+
+scenario:
+  type: portscan
+  portscan:
+    host: 127.0.0.1
+    ports: "22,80,443,8000-8010"
+    timeout: 1s
+    probes_per_second: 20

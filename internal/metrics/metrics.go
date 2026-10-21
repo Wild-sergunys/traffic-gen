@@ -78,7 +78,7 @@ func (m *Metrics) Snapshot() Snapshot {
 }
 
 // Report writes a snapshot to w every interval until ctx is cancelled.
-// It blocks until ctx is done and does not print the final summary - main does.
+// It blocks until ctx is done; the caller prints the final summary after it returns.
 func (m *Metrics) Report(ctx context.Context, w io.Writer, every time.Duration) {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()

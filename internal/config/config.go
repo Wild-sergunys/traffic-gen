@@ -1,5 +1,5 @@
-// Package config handles command-line flags and configuration validation
-// for the traffic-gen tool.
+// Package config loads CLI and YAML settings and validates HTTP traffic
+// generation and scenario configurations.
 package config
 
 import (
@@ -18,8 +18,8 @@ const (
 	maxRPS     = 10_000_000
 )
 
-// Sentinel errors returned by Parse and Validate. Callers can match
-// them with errors.Is to distinguish between different failures.
+// Sentinel errors identify command-line parsing and HTTP validation failures.
+// Callers can match them with errors.Is.
 var (
 	ErrHelpRequested      = errors.New("help requested")
 	ErrTargetRequired     = errors.New("target is required (use --target)")
@@ -42,7 +42,8 @@ var (
 	)
 )
 
-// Config holds all configuration for a traffic generation run.
+// Config holds HTTP traffic generation settings. RunConfig adds shared
+// settings and an optional scenario.
 type Config struct {
 	Target string
 	Mode   string
@@ -60,8 +61,8 @@ func Parse() (*Config, error) {
 	return ParseArgs(os.Args[1:])
 }
 
-// registerFlags declares all command-line flags on the given FlagSet.
-// It is shared by ParseArgs and Usage to keep the definitions in one place.
+// registerFlags declares legacy HTTP flags, shared by ParseArgs and
+// registerRunFlags so their defaults stay consistent.
 func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.StringVar(&cfg.Target, "target", "", "Target URL (e.g. http://192.168.1.10)")
 	fs.StringVar(&cfg.Mode, "mode", "http1", "Generation mode: http1 | http2 | h2c")
@@ -99,12 +100,12 @@ func ParseArgs(args []string) (*Config, error) {
 	return &cfg, nil
 }
 
-// Usage writes the flag help text to w. Call this when ParseArgs
+// Usage writes the flag help text to w. Call this when ParseRunArgs
 // returns ErrHelpRequested.
 func Usage(w io.Writer) {
 	fs := flag.NewFlagSet("traffic-gen", flag.ContinueOnError)
 	fs.SetOutput(w)
-	registerFlags(fs, &Config{})
+	registerRunFlags(fs, &Config{})
 	fs.PrintDefaults()
 }
 
