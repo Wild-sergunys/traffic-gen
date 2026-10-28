@@ -82,7 +82,16 @@ builds requests for the configured duration and keeps HTTP counters at zero.
 A scan-only dry-run validates the settings, prints the dry-run message, and
 exits without waiting for the duration.
 
-A scan summary reports `attempted`, `succeeded`, and `failed`. Success means
+A scan prints successfully connected ports in scan order, preserving duplicates,
+followed by totals. If no connection succeeded, the list is `none`. Individual
+connection errors are counted rather than printed:
+
+```text
+portscan: connected ports: 22, 80, 443
+portscan: attempted=1000 succeeded=3 failed=997
+```
+
+The totals report `attempted`, `succeeded`, and `failed`. Success means
 connecting and closing completed without error; failures include refused
 connections, timeouts, and interrupted attempts. A failed attempt does not
 by itself establish that a port is closed. Individual failures do not stop

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -89,13 +91,23 @@ func Run(ctx context.Context, cfg *config.RunConfig, out io.Writer) error {
 	}
 
 	if cfg.Scenario != nil && !cfg.DryRun {
-		succeeded := 0
+		var connected []string
 		for _, r := range res {
 			if r.Err == nil {
-				succeeded++
+				connected = append(connected, strconv.Itoa(r.Port))
 			}
 		}
 
+		ports := "none"
+		if len(connected) > 0 {
+			ports = strings.Join(connected, ", ")
+		}
+		_, err = fmt.Fprintf(out, "portscan: connected ports: %s\n", ports)
+		if err != nil {
+			return fmt.Errorf("write connected ports: %w", err)
+		}
+
+		succeeded := len(connected)
 		_, err = fmt.Fprintf(out, "portscan: attempted=%d succeeded=%d failed=%d\n", len(res), succeeded, len(res)-succeeded)
 		if err != nil {
 			return fmt.Errorf("write portscan summary: %w", err)

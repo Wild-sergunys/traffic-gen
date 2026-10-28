@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -117,15 +118,20 @@ func TestRunDuration(t *testing.T) {
 // deadline, and an already canceled context without requiring an HTTP server.
 func TestRunPortscan(t *testing.T) {
 	tests := []struct {
-		name     string
-		duration time.Duration
-		rate     int
-		canceled bool
-		want     string
+		name          string
+		duration      time.Duration
+		rate          int
+		canceled      bool
+		ports         int
+		failedPorts   int
+		wantConnected int
+		want          string
 	}{
-		{name: "complete", duration: time.Minute, want: "portscan: attempted=2 succeeded=2 failed=0\n"},
-		{name: "deadline", duration: 50 * time.Millisecond, rate: 1, want: "portscan: attempted=1 succeeded=1 failed=0\n"},
-		{name: "canceled", duration: time.Minute, canceled: true, want: "portscan: attempted=0 succeeded=0 failed=0\n"},
+		{name: "complete", duration: time.Minute, ports: 2, wantConnected: 2, want: "portscan: attempted=2 succeeded=2 failed=0\n"},
+		{name: "deadline", duration: 50 * time.Millisecond, rate: 1, ports: 2, wantConnected: 1, want: "portscan: attempted=1 succeeded=1 failed=0\n"},
+		{name: "canceled", duration: time.Minute, canceled: true, ports: 2, want: "portscan: attempted=0 succeeded=0 failed=0\n"},
+		{name: "mixed_results", duration: time.Minute, ports: 2, failedPorts: 1, wantConnected: 2, want: "portscan: attempted=3 succeeded=2 failed=1\n"},
+		{name: "all_failed", duration: time.Minute, failedPorts: 2, want: "portscan: attempted=2 succeeded=0 failed=2\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -133,7 +139,21 @@ func TestRunPortscan(t *testing.T) {
 			defer cancel()
 			listener := listenTCP(t)
 			scenario := scanConfig(listener)
-			scenario.Portscan.Ports = append(scenario.Portscan.Ports, scenario.Portscan.Ports[0])
+			port := scenario.Portscan.Ports[0]
+			scenario.Portscan.Ports = nil
+			for range tt.ports {
+				scenario.Portscan.Ports = append(scenario.Portscan.Ports, port)
+			}
+			if tt.failedPorts > 0 {
+				closed := listenTCP(t)
+				closedPort := closed.Addr().(*net.TCPAddr).Port
+				if err := closed.Close(); err != nil {
+					t.Fatalf("close scan target: %v", err)
+				}
+				for range tt.failedPorts {
+					scenario.Portscan.Ports = append(scenario.Portscan.Ports, closedPort)
+				}
+			}
 			scenario.Portscan.ProbesPerSecond = tt.rate
 			if tt.canceled {
 				cancel()
@@ -146,8 +166,17 @@ func TestRunPortscan(t *testing.T) {
 			if !tt.canceled && ctx.Err() != nil {
 				t.Errorf("Run waited for the outer context: %v", ctx.Err())
 			}
-			if got := out.String(); got != tt.want {
-				t.Errorf("output = %q, want %q", got, tt.want)
+			var connected []string
+			for range tt.wantConnected {
+				connected = append(connected, strconv.Itoa(port))
+			}
+			ports := "none"
+			if len(connected) > 0 {
+				ports = strings.Join(connected, ", ")
+			}
+			want := "portscan: connected ports: " + ports + "\n" + tt.want
+			if got := out.String(); got != want {
+				t.Errorf("output = %q, want %q", got, want)
 			}
 		})
 	}
@@ -220,7 +249,7 @@ func TestRunInvalidConfig(t *testing.T) {
 
 // TestRunOutputError checks that each final output path preserves writer errors.
 func TestRunOutputError(t *testing.T) {
-	for _, mode := range []string{"http", "portscan", "dry_run"} {
+	for _, mode := range []string{"http", "portscan", "portscan_summary", "dry_run"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
@@ -232,7 +261,11 @@ func TestRunOutputError(t *testing.T) {
 					Host: "127.0.0.1", Ports: []int{80}, Timeout: time.Second,
 				}}
 			}
-			if err := runner.Run(ctx, cfg, failingWriter{}); !errors.Is(err, io.ErrClosedPipe) {
+			writer := &failingWriter{}
+			if mode == "portscan_summary" {
+				writer.writesLeft = 1
+			}
+			if err := runner.Run(ctx, cfg, writer); !errors.Is(err, io.ErrClosedPipe) {
 				t.Errorf("Run() error = %v, want %v", err, io.ErrClosedPipe)
 			}
 		})
@@ -295,9 +328,15 @@ func assertNoConnection(t *testing.T, listener *net.TCPListener) {
 	}
 }
 
-type failingWriter struct{}
+type failingWriter struct{ writesLeft int }
 
-func (failingWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+func (w *failingWriter) Write(p []byte) (int, error) {
+	if w.writesLeft > 0 {
+		w.writesLeft--
+		return len(p), nil
+	}
+	return 0, io.ErrClosedPipe
+}
 
 type reportWriter struct {
 	bytes.Buffer
