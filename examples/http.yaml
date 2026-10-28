@@ -4,6 +4,7 @@ dry_run: false
 
 background:
   target: http://127.0.0.1:8080/health
+  request_timeout: 5s
   mode: http1
   rps: 100
   workers: 10

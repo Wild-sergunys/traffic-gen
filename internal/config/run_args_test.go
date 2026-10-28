@@ -43,14 +43,14 @@ func TestParseRunArgs(t *testing.T) {
 			name: "yaml_defaults",
 			args: []string{"--config", path},
 			want: &RunConfig{Duration: 30 * time.Second,
-				Background: &Config{Target: "http://example.com/", Mode: "http1",
+				Background: &Config{RequestTimeout: 5 * time.Second, Target: "http://example.com/", Mode: "http1",
 					RPS: 100, Duration: 30 * time.Second, Workers: 10}},
 		},
 		{
 			name: "yaml_equals_syntax", args: []string{"--config=" + path},
 			want: &RunConfig{
 				Duration: 30 * time.Second,
-				Background: &Config{
+				Background: &Config{RequestTimeout: 5 * time.Second,
 					Target: "http://example.com/", Mode: "http1", RPS: 100,
 					Duration: 30 * time.Second, Workers: 10,
 				},
@@ -70,7 +70,7 @@ func TestParseRunArgs(t *testing.T) {
 			name: "http_defaults", args: []string{"--target", "http://example.com/"},
 			want: &RunConfig{
 				Duration: 30 * time.Second,
-				Background: &Config{
+				Background: &Config{RequestTimeout: 5 * time.Second,
 					Target: "http://example.com/", Mode: "http1", RPS: 100,
 					Duration: 30 * time.Second, Workers: 10,
 				},
@@ -82,7 +82,7 @@ func TestParseRunArgs(t *testing.T) {
 				"--rps", "0", "--workers", "3", "--duration", "5s", "--dry-run"},
 			want: &RunConfig{
 				Duration: 5 * time.Second, DryRun: true,
-				Background: &Config{
+				Background: &Config{RequestTimeout: 5 * time.Second,
 					Target: "https://example.com/api?device=7", Mode: "http2", RPS: 0,
 					Duration: 5 * time.Second, Workers: 3, DryRun: true,
 				},
@@ -106,6 +106,7 @@ func TestParseRunArgs(t *testing.T) {
 		{name: "mixed_default_mode", args: []string{"--config", path, "--mode=http1"}, wantErr: true, wantCause: ErrConfigFlagMixed},
 		{name: "mixed_default_rate", args: []string{"--config", path, "--rps=100"}, wantErr: true, wantCause: ErrConfigFlagMixed},
 		{name: "mixed_default_workers", args: []string{"--config", path, "--workers=10"}, wantErr: true, wantCause: ErrConfigFlagMixed},
+		{name: "mixed_request_timeout", args: []string{"--config", path, "--request-timeout=5s"}, wantErr: true, wantCause: ErrConfigFlagMixed},
 		{name: "mixed_default_duration", args: []string{"--config", path, "--duration=30s"}, wantErr: true, wantCause: ErrConfigFlagMixed},
 		{name: "mixed_explicit_false", args: []string{"--config", path, "--dry-run=false"}, wantErr: true, wantCause: ErrConfigFlagMixed},
 		{name: "mixed_reverse_order", args: []string{"--dry-run=false", "--config", path}, wantErr: true, wantCause: ErrConfigFlagMixed},

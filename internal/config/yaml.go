@@ -13,10 +13,11 @@ import (
 
 // backgroundYAML uses pointers where omission must differ from an explicit zero value.
 type backgroundYAML struct {
-	Target  string  `yaml:"target"`
-	Mode    *string `yaml:"mode"`
-	RPS     *int    `yaml:"rps"`
-	Workers *int    `yaml:"workers"`
+	RequestTimeout *time.Duration `yaml:"request_timeout"`
+	Target         string         `yaml:"target"`
+	Mode           *string        `yaml:"mode"`
+	RPS            *int           `yaml:"rps"`
+	Workers        *int           `yaml:"workers"`
 }
 
 // portscanYAML keeps the port expression intact until conversion expands its ranges.
@@ -60,12 +61,17 @@ func (raw runYAML) toConfig() (*RunConfig, error) {
 
 	if raw.Background != nil {
 		cfg := Config{
-			Target:   raw.Background.Target,
-			Mode:     "http1",
-			RPS:      100,
-			Workers:  10,
-			Duration: runCfg.Duration,
-			DryRun:   runCfg.DryRun,
+			RequestTimeout: 5 * time.Second,
+			Target:         raw.Background.Target,
+			Mode:           "http1",
+			RPS:            100,
+			Workers:        10,
+			Duration:       runCfg.Duration,
+			DryRun:         runCfg.DryRun,
+		}
+
+		if raw.Background.RequestTimeout != nil {
+			cfg.RequestTimeout = *raw.Background.RequestTimeout
 		}
 
 		if raw.Background.Mode != nil {
@@ -131,6 +137,7 @@ var yamlFieldTags = map[string]string{
 	"duration":                            "!!str",
 	"dry_run":                             "!!bool",
 	"background":                          "!!map",
+	"background.request_timeout":          "!!str",
 	"background.target":                   "!!str",
 	"background.mode":                     "!!str",
 	"background.rps":                      "!!int",

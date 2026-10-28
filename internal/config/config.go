@@ -28,6 +28,7 @@ var (
 	ErrInvalidTargetHTTP2 = errors.New("mode http2 requires an https:// target")
 	ErrInvalidTargetH2C   = errors.New("mode h2c requires an http:// target")
 	ErrRPSNegative        = errors.New("rps cannot be negative")
+	ErrRequestTimeoutBad  = errors.New("request timeout cannot be negative")
 	ErrDurationBad        = errors.New("duration must be positive")
 	ErrExtraArgs          = errors.New("unexpected extra arguments")
 
@@ -51,9 +52,12 @@ type Config struct {
 	// RPS is the target requests per second. 0 means no throttling.
 	RPS int
 
-	Duration time.Duration
-	Workers  int
-	DryRun   bool
+	// RequestTimeout bounds one HTTP exchange, including response body reads.
+	// Zero disables this limit; the run context still applies.
+	RequestTimeout time.Duration
+	Duration       time.Duration
+	Workers        int
+	DryRun         bool
 }
 
 // Parse reads configuration from os.Args and returns a validated Config.
@@ -67,6 +71,7 @@ func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.StringVar(&cfg.Target, "target", "", "Target URL (e.g. http://192.168.1.10)")
 	fs.StringVar(&cfg.Mode, "mode", "http1", "Generation mode: http1 | http2 | h2c")
 	fs.IntVar(&cfg.RPS, "rps", 100, "Target requests per second (0 = unlimited)")
+	fs.DurationVar(&cfg.RequestTimeout, "request-timeout", 5*time.Second, "HTTP request timeout including body reads (0 = run limit only)")
 	fs.DurationVar(&cfg.Duration, "duration", 30*time.Second, "Duration of the run")
 	fs.IntVar(&cfg.Workers, "workers", 10, "Number of concurrent workers")
 	fs.BoolVar(&cfg.DryRun, "dry-run", false, "Run the pipeline without sending any request")
@@ -148,6 +153,10 @@ func (c *Config) Validate() error {
 		return ErrRPSRange
 	}
 
+	if c.RequestTimeout < 0 {
+		return ErrRequestTimeoutBad
+	}
+
 	if c.Duration <= 0 {
 		return ErrDurationBad
 	}
@@ -173,7 +182,7 @@ func (c *Config) String() string {
 	}
 
 	return fmt.Sprintf(
-		"target=%s mode=%s rps=%s duration=%s workers=%d dry-run=%v",
-		urlHidden, c.Mode, rps, c.Duration, c.Workers, c.DryRun,
+		"target=%s mode=%s rps=%s duration=%s request_timeout=%s workers=%d dry-run=%v",
+		urlHidden, c.Mode, rps, c.Duration, c.RequestTimeout, c.Workers, c.DryRun,
 	)
 }

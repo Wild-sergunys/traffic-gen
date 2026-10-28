@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +20,7 @@ type Record struct {
 	err        error
 }
 
-// brokenWriter fails every Write to exercise Report stderr fallback.
+// brokenWriter exposes a stable cause for report failures.
 type brokenWriter struct{}
 
 // errTestFail is the sentinel error for the one_error case.
@@ -39,7 +38,7 @@ func newMetrics(records []Record) *metrics.Metrics {
 }
 
 func (brokenWriter) Write(p []byte) (int, error) {
-	return 0, errors.New("broken pipe")
+	return 0, io.ErrClosedPipe
 }
 
 // TestMetrics verifies Record accumulation and Snapshot aggregation.
@@ -116,7 +115,9 @@ func TestReportCancel(t *testing.T) {
 
 	// A short interval would let the ticker fire. select picks at random
 	// when both cases are ready, so the test would fail intermittently.
-	m.Report(ctx, got, 2*time.Second)
+	if err := m.Report(ctx, got, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
 
 	if got.Len() != 0 {
 		t.Errorf("buffer_len = %d, want = %d", got.Len(), want)
@@ -132,7 +133,9 @@ func TestReportTicker(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
 	defer cancel()
 
-	m.Report(ctx, got, 20*time.Millisecond)
+	if err := m.Report(ctx, got, 20*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
 
 	// Contains instead of ==: the tick count depends on machine load, so
 	// the number of lines in the buffer cannot be predicted.
@@ -141,32 +144,16 @@ func TestReportTicker(t *testing.T) {
 	}
 }
 
-// TestReportBrokenWriter verifies that a failed write falls back to
-// os.Stderr with ErrWriteSnapshot.
+// TestReportBrokenWriter checks both the report classification and writer cause.
 func TestReportBrokenWriter(t *testing.T) {
-	r, w, _ := os.Pipe()
-	old := os.Stderr
-
-	// Report writes snapshots to its writer argument, but write failures to
-	// os.Stderr. Redirecting stderr to the pipe makes that fallback visible.
-	os.Stderr = w
-
-	m := newMetrics([]Record{{latency: 100 * time.Millisecond, nBytes: 300, err: nil}})
-	want := metrics.ErrWriteSnapshot
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	m := newMetrics(nil)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-
-	m.Report(ctx, brokenWriter{}, 20*time.Millisecond)
-
-	// Restore stderr for the remaining tests, then close the write end:
-	// io.ReadAll returns only on EOF, and EOF requires Close - without it
-	// the read blocks forever.
-	os.Stderr = old
-	w.Close()
-	got, _ := io.ReadAll(r)
-	r.Close()
-
-	if !strings.Contains(string(got), want.Error()) {
-		t.Errorf("stderr = %s, want = %v", got, want)
+	err := m.Report(ctx, brokenWriter{}, time.Millisecond)
+	if !errors.Is(err, metrics.ErrWriteSnapshot) || !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("Report() error = %v, want snapshot and writer errors", err)
+	}
+	if ctx.Err() != nil {
+		t.Errorf("Report waited for context cancellation: %v", ctx.Err())
 	}
 }

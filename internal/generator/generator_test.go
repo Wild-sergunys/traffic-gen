@@ -5,7 +5,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -720,4 +722,93 @@ func TestWorkerCanceledWithReadyTicket(t *testing.T) {
 		t.Error("timeout exit")
 	}
 
+}
+
+// TestSendRequestTimeout verifies that a request deadline covers headers and body
+// reads without canceling the caller, and that subsequent requests still work.
+func TestSendRequestTimeout(t *testing.T) {
+	for _, bodyStarted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("body_started_%t", bodyStarted), func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if requests.Add(1) > 1 {
+					_, _ = io.WriteString(w, "ok")
+					return
+				}
+				if bodyStarted {
+					w.Header().Set("Content-Length", "2")
+					_, _ = io.WriteString(w, "x")
+					w.(http.Flusher).Flush()
+				}
+				<-r.Context().Done()
+			}))
+			t.Cleanup(server.Close)
+			g, err := New(&config.Config{Target: server.URL + "/", Mode: "http1", Workers: 1, RequestTimeout: 100 * time.Millisecond})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(g.client.CloseIdleConnections)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			n, status, err := g.send(ctx, "test-UA")
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("send() error = %v, want deadline exceeded", err)
+			}
+			if ctx.Err() != nil {
+				t.Fatalf("caller context ended: %v", ctx.Err())
+			}
+			if bodyStarted && (n != 1 || status != http.StatusOK) {
+				t.Errorf("partial response = (%d, %d), want (1, 200)", n, status)
+			}
+			if !bodyStarted && (n != 0 || status != 0) {
+				t.Errorf("response = (%d, %d), want (0, 0)", n, status)
+			}
+			if _, _, err := g.send(ctx, "test-UA"); err != nil {
+				t.Errorf("next request failed: %v", err)
+			}
+		})
+	}
+}
+
+// TestRunClosesIdleConnections primes a reusable connection before a canceled
+// run, so cancellation of an in-flight request cannot hide missing idle cleanup.
+func TestRunClosesIdleConnections(t *testing.T) {
+	closed := make(chan struct{}, 2)
+	var connections atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		switch state {
+		case http.StateNew:
+			connections.Add(1)
+		case http.StateClosed:
+			closed <- struct{}{}
+		}
+	}
+	server.Start()
+	t.Cleanup(server.Close)
+	g, err := New(&config.Config{Target: server.URL + "/", Mode: "http1", Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(g.client.CloseIdleConnections)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	stopped, stop := context.WithCancel(ctx)
+	stop()
+	for i := range 2 {
+		if _, _, err := g.send(ctx, "test-UA"); err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		g.Run(stopped, &metrics.Metrics{})
+		select {
+		case <-closed:
+		case <-ctx.Done():
+			t.Fatalf("run %d did not close its idle connection: %v", i, ctx.Err())
+		}
+	}
+	if got := connections.Load(); got != 2 {
+		t.Errorf("connections = %d, want 2", got)
+	}
 }

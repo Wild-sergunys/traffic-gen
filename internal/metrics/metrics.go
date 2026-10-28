@@ -5,12 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"sync/atomic"
 	"time"
 )
 
-// ErrWriteSnapshot is written to stderr when a snapshot write fails.
+// ErrWriteSnapshot identifies a failed periodic report write.
 var ErrWriteSnapshot = errors.New("snapshot cannot be written")
 
 // Metrics collects atomic counters for a traffic generation run.
@@ -78,15 +77,16 @@ func (m *Metrics) Snapshot() Snapshot {
 }
 
 // Report writes a snapshot to w every interval until ctx is cancelled.
-// It blocks until ctx is done; the caller prints the final summary after it returns.
-func (m *Metrics) Report(ctx context.Context, w io.Writer, every time.Duration) {
+// Cancellation returns nil; a write failure stops reporting and preserves its cause.
+// The caller prints the final summary after Report returns.
+func (m *Metrics) Report(ctx context.Context, w io.Writer, every time.Duration) error {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-ticker.C:
 			s := m.Snapshot()
 			_, err := fmt.Fprintf(
@@ -94,9 +94,8 @@ func (m *Metrics) Report(ctx context.Context, w io.Writer, every time.Duration) 
 				s.Sent, s.Errors, s.StatusClasses[0], s.StatusClasses[1], s.StatusClasses[2], s.StatusClasses[3],
 				s.Bytes, s.AvgLatency.Round(time.Millisecond),
 			)
-			// Error written in stderr, because w is broken.
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "%v: %v\n", ErrWriteSnapshot, err)
+				return fmt.Errorf("%w: %w", ErrWriteSnapshot, err)
 			}
 		}
 	}

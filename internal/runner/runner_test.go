@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/wild-sergunys/traffic-gen/internal/config"
+	"github.com/wild-sergunys/traffic-gen/internal/metrics"
 	"github.com/wild-sergunys/traffic-gen/internal/portscan"
 	"github.com/wild-sergunys/traffic-gen/internal/runner"
 )
@@ -125,11 +126,12 @@ func TestRunPortscan(t *testing.T) {
 		ports         int
 		failedPorts   int
 		wantConnected int
+		reason        string
 		want          string
 	}{
 		{name: "complete", duration: time.Minute, ports: 2, wantConnected: 2, want: "portscan: attempted=2 succeeded=2 failed=0\n"},
-		{name: "deadline", duration: 50 * time.Millisecond, rate: 1, ports: 2, wantConnected: 1, want: "portscan: attempted=1 succeeded=1 failed=0\n"},
-		{name: "canceled", duration: time.Minute, canceled: true, ports: 2, want: "portscan: attempted=0 succeeded=0 failed=0\n"},
+		{name: "deadline", reason: "deadline", duration: 50 * time.Millisecond, rate: 1, ports: 2, wantConnected: 1, want: "portscan: attempted=1 succeeded=1 failed=0\n"},
+		{name: "canceled", reason: "canceled", duration: time.Minute, canceled: true, ports: 2, want: "portscan: attempted=0 succeeded=0 failed=0\n"},
 		{name: "mixed_results", duration: time.Minute, ports: 2, failedPorts: 1, wantConnected: 2, want: "portscan: attempted=3 succeeded=2 failed=1\n"},
 		{name: "all_failed", duration: time.Minute, failedPorts: 2, want: "portscan: attempted=2 succeeded=0 failed=2\n"},
 	}
@@ -160,6 +162,7 @@ func TestRunPortscan(t *testing.T) {
 			}
 			var out bytes.Buffer
 			cfg := &config.RunConfig{Duration: tt.duration, Scenario: scenario}
+			before := time.Now()
 			if err := runner.Run(ctx, cfg, &out); err != nil {
 				t.Fatalf("Run() error = %v", err)
 			}
@@ -175,9 +178,14 @@ func TestRunPortscan(t *testing.T) {
 				ports = strings.Join(connected, ", ")
 			}
 			want := "portscan: connected ports: " + ports + "\n" + tt.want
-			if got := out.String(); got != want {
-				t.Errorf("output = %q, want %q", got, want)
+			if !strings.HasPrefix(out.String(), want) {
+				t.Errorf("output = %q, want prefix %q", out.String(), want)
 			}
+			reason := tt.reason
+			if reason == "" {
+				reason = "completed"
+			}
+			checkScanTiming(t, strings.TrimPrefix(out.String(), want), scenario.Portscan.Host, reason, before, time.Now())
 		})
 	}
 }
@@ -249,7 +257,7 @@ func TestRunInvalidConfig(t *testing.T) {
 
 // TestRunOutputError checks that each final output path preserves writer errors.
 func TestRunOutputError(t *testing.T) {
-	for _, mode := range []string{"http", "portscan", "portscan_summary", "dry_run"} {
+	for _, mode := range []string{"http", "portscan", "portscan_summary", "portscan_timing", "dry_run"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
@@ -264,6 +272,9 @@ func TestRunOutputError(t *testing.T) {
 			writer := &failingWriter{}
 			if mode == "portscan_summary" {
 				writer.writesLeft = 1
+			}
+			if mode == "portscan_timing" {
+				writer.writesLeft = 2
 			}
 			if err := runner.Run(ctx, cfg, writer); !errors.Is(err, io.ErrClosedPipe) {
 				t.Errorf("Run() error = %v, want %v", err, io.ErrClosedPipe)
@@ -349,4 +360,77 @@ func (w *reportWriter) Write(p []byte) (int, error) {
 		w.cancel()
 	}
 	return n, err
+}
+
+// checkScanTiming verifies target, completion reason, and the measured interval.
+func checkScanTiming(t *testing.T, line, wantHost, wantReason string, before, after time.Time) time.Time {
+	t.Helper()
+	var host, started, finished, reason string
+	if _, err := fmt.Sscanf(line, "portscan: host=%q started=%s finished=%s reason=%s", &host, &started, &finished, &reason); err != nil {
+		t.Fatalf("invalid timing output %q: %v", line, err)
+	}
+	if host != wantHost || reason != wantReason {
+		t.Errorf("host/reason = %q/%q, want %q/%q", host, reason, wantHost, wantReason)
+	}
+	start, err := time.Parse(time.RFC3339Nano, started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finish, err := time.Parse(time.RFC3339Nano, finished)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start.Before(before) || finish.Before(start) || finish.After(after) {
+		t.Errorf("scan interval %s..%s outside run %s..%s", start, finish, before, after)
+	}
+	return finish
+}
+
+// TestRunScanFinishesBeforeBackground checks that a later background deadline
+// does not overwrite the scan's earlier completion reason or timestamp.
+func TestRunScanFinishesBeforeBackground(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	t.Cleanup(server.Close)
+	listener := listenTCP(t)
+	cfg := &config.RunConfig{Duration: 150 * time.Millisecond, Background: httpConfig(server.URL), Scenario: scanConfig(listener)}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	var out bytes.Buffer
+	before := time.Now()
+	if err := runner.Run(ctx, cfg, &out); err != nil {
+		t.Fatal(err)
+	}
+	var timing string
+	for line := range strings.SplitSeq(out.String(), "\n") {
+		if strings.HasPrefix(line, "portscan: host=") {
+			timing = line
+		}
+	}
+	finish := checkScanTiming(t, timing, "127.0.0.1", "completed", before, time.Now())
+	if !finish.Before(before.Add(cfg.Duration)) {
+		t.Errorf("scan finish %s includes waiting for the HTTP background", finish)
+	}
+}
+
+// TestRunReportFailure cancels both tasks when periodic output breaks, waits for
+// their shutdown, and returns the original writer error instead of hiding it.
+func TestRunReportFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	t.Cleanup(server.Close)
+	listener := listenTCP(t)
+	scenario := scanConfig(listener)
+	scenario.Portscan.ProbesPerSecond = 1
+	for range 20 {
+		scenario.Portscan.Ports = append(scenario.Portscan.Ports, scenario.Portscan.Ports[0])
+	}
+	cfg := &config.RunConfig{Duration: time.Minute, Background: httpConfig(server.URL), Scenario: scenario}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	err := runner.Run(ctx, cfg, &failingWriter{})
+	if !errors.Is(err, metrics.ErrWriteSnapshot) || !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("Run() error = %v, want snapshot and writer errors", err)
+	}
+	if ctx.Err() != nil {
+		t.Errorf("Run waited for the caller deadline: %v", ctx.Err())
+	}
 }

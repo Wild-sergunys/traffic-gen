@@ -54,6 +54,7 @@ func New(cfg *config.Config) (*Generator, error) {
 		cfg:    cfg,
 		target: u,
 		client: &http.Client{
+			Timeout: cfg.RequestTimeout,
 			Transport: &http.Transport{
 				Protocols: &protocol,
 				// Size the idle pool for the workers instead of the default
@@ -170,6 +171,7 @@ func (g *Generator) work(ctx context.Context, m *metrics.Metrics, userAgent stri
 // to finish. At rps > 0 one shared ticker paces all workers; ticks may
 // be dropped when workers cannot keep up. At rps == 0 workers run as fast
 // as they can. The caller controls the run duration through ctx.
+// Idle HTTP connections are closed after all workers finish.
 func (g *Generator) Run(ctx context.Context, m *metrics.Metrics) {
 	wg := sync.WaitGroup{}
 	var tickets <-chan time.Time
@@ -186,4 +188,5 @@ func (g *Generator) Run(ctx context.Context, m *metrics.Metrics) {
 		}()
 	}
 	wg.Wait()
+	g.client.CloseIdleConnections()
 }

@@ -62,13 +62,18 @@ continue to work.
 Defaults for omitted fields:
 
 - Run: `duration: 30s`, `dry_run: false`.
-- Background: `mode: http1`, `rps: 100`, `workers: 10`; `target` is required.
+- Background: `mode: http1`, `rps: 100`, `workers: 10`, `request_timeout: 5s`; `target` is required.
 - Port scan: `timeout: 1s`, `probes_per_second: 0`; `host` and `ports` are required.
 
 Explicit zero rates mean unlimited traffic; zero durations or worker counts
 are invalid. Durations and port expressions must be strings, rates and worker
 counts integers, and `dry_run` a boolean. Only one YAML document is accepted.
 Nulls, aliases, merge keys, duplicate keys, and unknown fields are rejected.
+
+HTTP `background.request_timeout` bounds each request, including reading its
+response body. A timed-out attempt is counted as an error and the worker continues.
+Zero disables this additional limit; negative values are rejected. The common
+run context can always stop a request earlier.
 
 The top-level duration limits the entire run. HTTP background and the scan
 start independently; finishing the scan does not stop HTTP background. A
@@ -89,7 +94,15 @@ connection errors are counted rather than printed:
 ```text
 portscan: connected ports: 22, 80, 443
 portscan: attempted=1000 succeeded=3 failed=997
+portscan: host="127.0.0.1" started=2026-10-28T12:00:00Z finished=2026-10-28T12:00:01Z reason=completed
 ```
+
+The timing line identifies the configured host and the scan execution interval
+in UTC (RFC 3339 with fractional seconds as needed). Times are recorded around
+the scanner call, before waiting for HTTP background; they are not packet-capture
+timestamps. Reasons are `completed` (port list exhausted), `deadline` (context
+time limit), `canceled`, or `error`. Individual connection failures do not change
+`completed` to `error`. Dry-run emits no scan interval.
 
 The totals report `attempted`, `succeeded`, and `failed`. Success means
 connecting and closing completed without error; failures include refused
@@ -139,6 +152,7 @@ are counted as request errors.
 | `--target` | Required without `--config` | HTTP target URL |
 | `--mode` | `http1` | `http1`, `http2`, or `h2c` |
 | `--rps` | `100` | Target request rate across all workers, from 0 to 10,000,000; `0` means unlimited |
+| `--request-timeout` | `5s` | Limit one HTTP exchange, including body reads; `0` leaves only the run limit |
 | `--duration` | `30s` | Run duration |
 | `--workers` | `10` | Number of workers, from 1 to 1000 |
 | `--dry-run` | `false` | Build requests without sending them |
@@ -162,7 +176,8 @@ Target validation errors omit or mask passwords supplied as
 
 Each worker selects a User-Agent from a fixed pool once and keeps it
 for the entire run. Workers share the transport and connection pool;
-they do not represent independent browser sessions.
+they do not represent independent browser sessions. Once all workers finish,
+the generator closes idle HTTP connections; a later run can open new ones.
 
 Workers check cancellation before each unit of work. If cancellation happens
 after that check, a live attempt may still start and is included in the metrics.
@@ -202,7 +217,8 @@ Requests cancelled when the run ends can increase the error count.
 Request errors currently appear only in the counters; they do not make
 the process exit with a nonzero status. Invalid configuration and
 generator setup errors do produce a nonzero exit status, as do failures to
-write final summaries.
+write periodic reports or final summaries. A periodic report write failure
+cancels enabled tasks, waits for their shutdown, and returns a nonzero status.
 
 ## Benchmarks
 

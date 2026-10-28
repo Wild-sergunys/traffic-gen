@@ -54,7 +54,7 @@ func TestRunYAMLToConfig(t *testing.T) {
 				raw.Background = &backgroundYAML{
 					Target: "https://example.com/api?device=7", Mode: &mode, RPS: &rate, Workers: &workers,
 				}
-				want.Background = &Config{
+				want.Background = &Config{RequestTimeout: 5 * time.Second,
 					Target: "https://example.com/api?device=7", Mode: "http2", RPS: 250,
 					Workers: 3, Duration: 30 * time.Second,
 				}
@@ -160,7 +160,7 @@ func TestRunYAMLToConfig(t *testing.T) {
 			}
 			want := &RunConfig{
 				Duration: 30 * time.Second,
-				Background: &Config{
+				Background: &Config{RequestTimeout: 5 * time.Second,
 					Target: "http://example.com/", Mode: "http1", RPS: 100,
 					Workers: 10, Duration: 30 * time.Second,
 				},
@@ -200,7 +200,7 @@ func TestDecodeYAML(t *testing.T) {
 
 	backgroundDefaults := &RunConfig{
 		Duration: 30 * time.Second,
-		Background: &Config{
+		Background: &Config{RequestTimeout: 5 * time.Second,
 			Target: "http://example.com/", Mode: "http1", RPS: 100,
 			Workers: 10, Duration: 30 * time.Second,
 		},
@@ -251,7 +251,7 @@ scenario:
 `,
 			want: &RunConfig{
 				Duration: 5 * time.Second, DryRun: true,
-				Background: &Config{
+				Background: &Config{RequestTimeout: 5 * time.Second,
 					Target: "https://example.com/api?device=7", Mode: "http2", RPS: 0,
 					Workers: 3, Duration: 5 * time.Second, DryRun: true,
 				},
@@ -362,5 +362,34 @@ func TestDecodeYAMLReadError(t *testing.T) {
 	}
 	if got != nil {
 		t.Errorf("DecodeYAML() = %+v on read error, want nil", got)
+	}
+}
+
+// TestDecodeYAMLRequestTimeout checks overrides, disabling, and strict input types.
+func TestDecodeYAMLRequestTimeout(t *testing.T) {
+	tests := []struct {
+		name, value string
+		want        time.Duration
+		wantErr     bool
+	}{
+		{name: "custom", value: "2s", want: 2 * time.Second},
+		{name: "disabled", value: "0s"},
+		{name: "negative", value: "-1s", wantErr: true},
+		{name: "numeric", value: "2", wantErr: true},
+		{name: "null", value: "null", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := DecodeYAML(strings.NewReader("background:\n  target: http://example.com/\n  request_timeout: " + tt.value + "\n"))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("DecodeYAML() error = %v, want error %t", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if cfg.Background.RequestTimeout != tt.want {
+				t.Errorf("request timeout = %v, want %v", cfg.Background.RequestTimeout, tt.want)
+			}
+		})
 	}
 }

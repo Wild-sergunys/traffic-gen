@@ -27,6 +27,9 @@ func TestParseArgsDefaults(t *testing.T) {
 	if cfg.RPS != 100 {
 		t.Errorf("rps = %d, want %d", cfg.RPS, 100)
 	}
+	if cfg.RequestTimeout != 5*time.Second {
+		t.Errorf("request timeout = %v, want 5s", cfg.RequestTimeout)
+	}
 	if cfg.Duration != 30*time.Second {
 		t.Errorf("duration = %v, want %v", cfg.Duration, 30*time.Second)
 	}
@@ -46,6 +49,7 @@ func TestParseArgsAllCustomFlags(t *testing.T) {
 		"--mode", "http2",
 		"--rps", "500",
 		"--duration", "5m",
+		"--request-timeout", "2s",
 		"--workers", "50",
 		"--dry-run",
 	}
@@ -63,6 +67,9 @@ func TestParseArgsAllCustomFlags(t *testing.T) {
 	}
 	if cfg.RPS != 500 {
 		t.Errorf("rps = %d, want %d", cfg.RPS, 500)
+	}
+	if cfg.RequestTimeout != 2*time.Second {
+		t.Errorf("request timeout = %v, want 2s", cfg.RequestTimeout)
 	}
 	if cfg.Duration != 5*time.Minute {
 		t.Errorf("duration = %v, want %v", cfg.Duration, 5*time.Minute)
@@ -83,6 +90,7 @@ func TestParseArgsValidationErrors(t *testing.T) {
 		args    []string
 		wantErr error
 	}{
+		{"negative request timeout", []string{"--target", "http://x", "--request-timeout=-1s"}, config.ErrRequestTimeoutBad},
 		// nil args means "no command-line arguments were provided".
 		// flag.FlagSet.Parse(nil) does NOT fall back to os.Args.
 		{"missing target", nil, config.ErrTargetRequired},
@@ -281,7 +289,7 @@ func TestUsage(t *testing.T) {
 		t.Fatal("usage output is empty")
 	}
 
-	for _, flag := range []string{"target", "mode", "rps", "duration", "workers", "dry-run", "config"} {
+	for _, flag := range []string{"target", "mode", "rps", "duration", "workers", "dry-run", "request-timeout", "config"} {
 		if !strings.Contains(out, "-"+flag) {
 			t.Errorf("usage output does not mention -%s", flag)
 		}
