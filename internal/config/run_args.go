@@ -9,6 +9,8 @@ import (
 )
 
 var (
+	// ErrVersionRequested requests build information without loading a configuration.
+	ErrVersionRequested = errors.New("version requested")
 	// ErrConfigFlagMixed rejects YAML combined with explicitly supplied HTTP flags.
 	ErrConfigFlagMixed = errors.New("--config cannot be combined with HTTP flags")
 	// ErrConfigEmptyPath identifies an explicitly supplied empty config path.
@@ -17,13 +19,13 @@ var (
 
 // ParseRunArgs loads and validates either a YAML file or legacy HTTP flags.
 // YAML cannot be combined with HTTP flags, even when their values match defaults.
-// Help returns ErrHelpRequested without opening the configuration file.
+// Help and version requests return their sentinel without opening the configuration file.
 func ParseRunArgs(args []string) (*RunConfig, error) {
 	fs := flag.NewFlagSet("traffic-gen", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
 	var cfg Config
-	configPath := registerRunFlags(fs, &cfg)
+	configPath, showVersion := registerRunFlags(fs, &cfg)
 
 	err := fs.Parse(args)
 	if err != nil {
@@ -31,6 +33,10 @@ func ParseRunArgs(args []string) (*RunConfig, error) {
 			return nil, ErrHelpRequested
 		}
 		return nil, err
+	}
+
+	if *showVersion {
+		return nil, ErrVersionRequested
 	}
 
 	if fs.NArg() > 0 {
@@ -42,7 +48,7 @@ func ParseRunArgs(args []string) (*RunConfig, error) {
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "config" {
 			configSet = true
-		} else {
+		} else if f.Name != "version" {
 			httpFlagsSet = true
 		}
 	})
@@ -89,7 +95,8 @@ func ParseRunArgs(args []string) (*RunConfig, error) {
 }
 
 // registerRunFlags shares the complete flag definitions with Usage.
-func registerRunFlags(fs *flag.FlagSet, cfg *Config) *string {
+func registerRunFlags(fs *flag.FlagSet, cfg *Config) (configPath *string, showVersion *bool) {
 	registerFlags(fs, cfg)
-	return fs.String("config", "", "Path to YAML configuration file")
+	return fs.String("config", "", "Path to YAML configuration file"),
+		fs.Bool("version", false, "Print version, commit and build date without generating traffic")
 }

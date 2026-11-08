@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -76,27 +75,14 @@ func (m *Metrics) Snapshot() Snapshot {
 	return s
 }
 
-// Report writes a snapshot to w every interval until ctx is cancelled.
-// Cancellation returns nil; a write failure stops reporting and preserves its cause.
-// The caller prints the final summary after Report returns.
-func (m *Metrics) Report(ctx context.Context, w io.Writer, every time.Duration) error {
-	ticker := time.NewTicker(every)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			s := m.Snapshot()
-			_, err := fmt.Fprintf(
-				w, "sent=%v, errors=%v, 2xx=%v, 3xx=%v, 4xx=%v, 5xx=%v, bytes=%v, avg latency=%v\n",
-				s.Sent, s.Errors, s.StatusClasses[0], s.StatusClasses[1], s.StatusClasses[2], s.StatusClasses[3],
-				s.Bytes, s.AvgLatency.Round(time.Millisecond),
-			)
-			if err != nil {
-				return fmt.Errorf("%w: %w", ErrWriteSnapshot, err)
-			}
-		}
+// WriteSnapshot writes one report with an optional source prefix. Callers must
+// serialize writes when multiple metrics sets share a writer.
+func (m *Metrics) WriteSnapshot(w io.Writer, prefix string) error {
+	s := m.Snapshot()
+	_, err := fmt.Fprintf(w, "%ssent=%v, errors=%v, 2xx=%v, 3xx=%v, 4xx=%v, 5xx=%v, bytes=%v, avg latency=%v\n",
+		prefix, s.Sent, s.Errors, s.StatusClasses[0], s.StatusClasses[1], s.StatusClasses[2], s.StatusClasses[3], s.Bytes, s.AvgLatency.Round(time.Millisecond))
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrWriteSnapshot, err)
 	}
+	return nil
 }

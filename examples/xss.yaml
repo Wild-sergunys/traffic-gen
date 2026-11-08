@@ -1,0 +1,18 @@
+# Custom XSS attempts alongside normal GET traffic.
+# Run: ./bin/traffic-gen --config examples/xss.yaml
+duration: 10s
+background:
+  target: http://127.0.0.1:8080/health
+  rps: 100
+  workers: 4
+scenario:
+  type: xss
+  http:
+    target: http://127.0.0.1:8080/search?device=7
+    rps: 10
+    workers: 1
+    methods: [GET, POST]
+    parameter: q
+    payloads:
+      - '<script>alert(1)</script>'
+      - '<img src=x onerror=alert(1)>'

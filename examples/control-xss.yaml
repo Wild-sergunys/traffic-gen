@@ -1,0 +1,20 @@
+# Control corpus v1. See docs/validation-corpus.md for provenance and limitations.
+# These are request inputs; no browser execution is performed.
+duration: 10s
+scenario:
+  type: xss
+  http:
+    target: http://127.0.0.1:8080/search?device=7
+    methods: [GET, POST]
+    parameter: q
+    rps: 10
+    workers: 1
+    payloads:
+      # XSS-C01: mixed-case SVG and slash before the event attribute.
+      - '<SvG/onload=alert(7)>'
+      # XSS-C02: closing an attribute before an image event handler.
+      - '"><img src=x onerror=alert(7)>'
+      # XSS-C03: closing a title context before a script element.
+      - '</title><script>alert(7)</script>'
+      # XSS-C04: body event handler with whitespace around the assignment.
+      - '<body onload = alert(7)>'

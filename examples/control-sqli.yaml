@@ -1,0 +1,20 @@
+# Control corpus v1. See docs/validation-corpus.md for provenance and limitations.
+# Keep separate from examples used to develop detection rules.
+duration: 10s
+scenario:
+  type: sqli
+  http:
+    target: http://127.0.0.1:8080/search?device=7
+    methods: [GET, POST]
+    parameter: q
+    rps: 10
+    workers: 1
+    payloads:
+      # SQL-C01: numeric disjunction (adapted OWASP WSTG v4.2).
+      - '10 OR 2=2'
+      # SQL-C02: false condition; still an injection attempt.
+      - '10 AND 2=3'
+      # SQL-C03: UNION shape without reading application tables.
+      - '10 UNION SELECT NULL,NULL,NULL'
+      # SQL-C04: alternative boolean expression.
+      - '10 OR 2 BETWEEN 1 AND 3'

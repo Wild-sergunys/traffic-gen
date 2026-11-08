@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"time"
 
 	"github.com/wild-sergunys/traffic-gen/internal/portscan"
@@ -13,6 +14,7 @@ import (
 
 // backgroundYAML uses pointers where omission must differ from an explicit zero value.
 type backgroundYAML struct {
+	Profile        string         `yaml:"profile"`
 	RequestTimeout *time.Duration `yaml:"request_timeout"`
 	Target         string         `yaml:"target"`
 	Mode           *string        `yaml:"mode"`
@@ -30,8 +32,18 @@ type portscanYAML struct {
 
 // scenarioYAML keeps a missing settings block visible to scenario validation.
 type scenarioYAML struct {
-	Type     string        `yaml:"type"`
-	Portscan *portscanYAML `yaml:"portscan"`
+	Type     string            `yaml:"type"`
+	Portscan *portscanYAML     `yaml:"portscan"`
+	HTTP     *httpScenarioYAML `yaml:"http"`
+}
+
+// httpScenarioYAML flattens shared HTTP settings into the scenario.http block.
+// Nil methods and parameter select defaults; nil payloads select a built-in profile.
+type httpScenarioYAML struct {
+	backgroundYAML `yaml:",inline"`
+	Methods        []string `yaml:"methods"`
+	Payloads       []string `yaml:"payloads"`
+	Parameter      *string  `yaml:"parameter"`
 }
 
 // runYAML represents input fields before defaults and semantic validation.
@@ -63,6 +75,7 @@ func (raw runYAML) toConfig() (*RunConfig, error) {
 		cfg := Config{
 			RequestTimeout: 5 * time.Second,
 			Target:         raw.Background.Target,
+			Profile:        raw.Background.Profile,
 			Mode:           "http1",
 			RPS:            100,
 			Workers:        10,
@@ -93,6 +106,46 @@ func (raw runYAML) toConfig() (*RunConfig, error) {
 	if raw.Scenario != nil {
 		scenarioCfg := ScenarioConfig{
 			Type: raw.Scenario.Type,
+		}
+
+		if raw.Scenario.HTTP != nil {
+			httpCfg := HTTPScenarioConfig{
+				Cfg: Config{
+					Target:         raw.Scenario.HTTP.Target,
+					Profile:        raw.Scenario.HTTP.Profile,
+					Mode:           "http1",
+					RPS:            10,
+					Workers:        1,
+					RequestTimeout: 5 * time.Second,
+					Duration:       runCfg.Duration,
+					DryRun:         runCfg.DryRun,
+				},
+				Methods:   []string{http.MethodGet, http.MethodPost},
+				Parameter: "q",
+				Payloads:  raw.Scenario.HTTP.Payloads,
+			}
+
+			// Defaults apply only to omitted fields, preserving explicit zero values.
+			if raw.Scenario.HTTP.Mode != nil {
+				httpCfg.Cfg.Mode = *raw.Scenario.HTTP.Mode
+			}
+			if raw.Scenario.HTTP.RPS != nil {
+				httpCfg.Cfg.RPS = *raw.Scenario.HTTP.RPS
+			}
+			if raw.Scenario.HTTP.Workers != nil {
+				httpCfg.Cfg.Workers = *raw.Scenario.HTTP.Workers
+			}
+			if raw.Scenario.HTTP.RequestTimeout != nil {
+				httpCfg.Cfg.RequestTimeout = *raw.Scenario.HTTP.RequestTimeout
+			}
+			if raw.Scenario.HTTP.Parameter != nil {
+				httpCfg.Parameter = *raw.Scenario.HTTP.Parameter
+			}
+			// Keep an explicit empty list so validation can reject it.
+			if raw.Scenario.HTTP.Methods != nil {
+				httpCfg.Methods = raw.Scenario.HTTP.Methods
+			}
+			scenarioCfg.HTTP = &httpCfg
 		}
 
 		if raw.Scenario.Portscan != nil {
@@ -139,11 +192,22 @@ var yamlFieldTags = map[string]string{
 	"background":                          "!!map",
 	"background.request_timeout":          "!!str",
 	"background.target":                   "!!str",
+	"background.profile":                  "!!str",
 	"background.mode":                     "!!str",
 	"background.rps":                      "!!int",
 	"background.workers":                  "!!int",
 	"scenario":                            "!!map",
 	"scenario.type":                       "!!str",
+	"scenario.http":                       "!!map",
+	"scenario.http.target":                "!!str",
+	"scenario.http.profile":               "!!str",
+	"scenario.http.mode":                  "!!str",
+	"scenario.http.request_timeout":       "!!str",
+	"scenario.http.parameter":             "!!str",
+	"scenario.http.rps":                   "!!int",
+	"scenario.http.workers":               "!!int",
+	"scenario.http.methods":               "!!seq",
+	"scenario.http.payloads":              "!!seq",
 	"scenario.portscan":                   "!!map",
 	"scenario.portscan.host":              "!!str",
 	"scenario.portscan.ports":             "!!str",
@@ -275,6 +339,16 @@ func validateYAMLTypes(node *yaml.Node, path string) error {
 		if value.Tag != expectedTag {
 			return fmt.Errorf("%w: field %q must have type %s",
 				ErrYAMLConfigBad, fieldPath, expectedTag)
+		}
+
+		// Known sequence fields contain strings; reject coercion before decoding.
+		if value.Kind == yaml.SequenceNode {
+			for index, item := range value.Content {
+				if item.Kind != yaml.ScalarNode || item.Tag != "!!str" {
+					return fmt.Errorf("%w: field %q item %d must be a string",
+						ErrYAMLConfigBad, fieldPath, index)
+				}
+			}
 		}
 
 		if value.Kind == yaml.MappingNode {

@@ -31,46 +31,46 @@ func Run(ctx context.Context, cfg *config.RunConfig, out io.Writer) error {
 	ctx, cancel := context.WithTimeout(ctx, cfg.Duration)
 	defer cancel()
 
-	var g *generator.Generator
-
+	var tasks []*httpTask
 	if cfg.Background != nil {
-		// Apply shared settings without changing the caller's HTTP configuration.
+		// Apply shared settings without changing the caller's configuration.
 		back := *cfg.Background
-		back.Duration = cfg.Duration
-		back.DryRun = cfg.DryRun
-		g, err = generator.New(&back)
+		back.Duration, back.DryRun = cfg.Duration, cfg.DryRun
+		g, err := generator.New(&back)
 		if err != nil {
 			return err
 		}
+		tasks = append(tasks, &httpTask{generator: g})
 	}
-
+	if cfg.Scenario != nil && cfg.Scenario.HTTP != nil {
+		scenario := *cfg.Scenario.HTTP
+		scenario.Cfg.Duration, scenario.Cfg.DryRun = cfg.Duration, cfg.DryRun
+		g, err := generator.NewScenario(cfg.Scenario.Type, &scenario)
+		if err != nil {
+			return err
+		}
+		tasks = append(tasks, &httpTask{name: cfg.Scenario.Type, generator: g})
+	}
 	var wg sync.WaitGroup
-	var m metrics.Metrics
 	var reportErr error
-
 	start := time.Now()
-	if g != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			g.Run(ctx, &m)
-		}()
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			reportErr = m.Report(ctx, out, 2*time.Second)
+	for _, task := range tasks {
+		wg.Go(func() { task.generator.Run(ctx, &task.metrics) })
+	}
+	if len(tasks) > 0 {
+		wg.Go(func() {
+			reportErr = reportHTTP(ctx, out, tasks)
 			if reportErr != nil {
 				cancel()
 			}
-		}()
+		})
 	}
 
 	var res []portscan.Result
 	var scanErr error
 	var scanStarted, scanFinished time.Time
 
-	if cfg.Scenario != nil && !cfg.DryRun {
+	if cfg.Scenario != nil && cfg.Scenario.Type == "portscan" && !cfg.DryRun {
 		scanStarted = time.Now()
 		res, scanErr = portscan.Run(ctx, *cfg.Scenario.Portscan)
 		// Record completion before waiting for the independent HTTP background.
@@ -91,18 +91,22 @@ func Run(ctx context.Context, cfg *config.RunConfig, out io.Writer) error {
 		}
 	}
 
-	if g != nil {
-		s := m.Snapshot()
+	for _, task := range tasks {
+		s := task.metrics.Snapshot()
+		prefix := ""
+		if task.name != "" {
+			prefix = task.name + " "
+		}
 
-		_, err = fmt.Fprintf(out, "final: sent=%d, errors=%d, 2xx=%v, 3xx=%v, 4xx=%v, 5xx=%v, bytes=%d, avg latency=%v, run time=%v\n",
-			s.Sent, s.Errors, s.StatusClasses[0], s.StatusClasses[1], s.StatusClasses[2], s.StatusClasses[3], s.Bytes,
+		_, err = fmt.Fprintf(out, "%sfinal: sent=%d, errors=%d, 2xx=%v, 3xx=%v, 4xx=%v, 5xx=%v, bytes=%d, avg latency=%v, run time=%v\n",
+			prefix, s.Sent, s.Errors, s.StatusClasses[0], s.StatusClasses[1], s.StatusClasses[2], s.StatusClasses[3], s.Bytes,
 			s.AvgLatency.Round(time.Millisecond), time.Since(start))
 		if err != nil {
 			return fmt.Errorf("result output error: %w", err)
 		}
 	}
 
-	if cfg.Scenario != nil && !cfg.DryRun {
+	if cfg.Scenario != nil && cfg.Scenario.Type == "portscan" && !cfg.DryRun {
 		var connected []string
 		for _, r := range res {
 			if r.Err == nil {
@@ -151,4 +155,32 @@ func Run(ctx context.Context, cfg *config.RunConfig, out io.Writer) error {
 	}
 
 	return nil
+}
+
+// httpTask owns counters for one traffic source; only the reporter writes to out.
+type httpTask struct {
+	name      string
+	generator *generator.Generator
+	metrics   metrics.Metrics
+}
+
+func reportHTTP(ctx context.Context, out io.Writer, tasks []*httpTask) error {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			for _, task := range tasks {
+				prefix := ""
+				if task.name != "" {
+					prefix = task.name + ": "
+				}
+				if err := task.metrics.WriteSnapshot(out, prefix); err != nil {
+					return err
+				}
+			}
+		}
+	}
 }

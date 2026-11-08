@@ -393,3 +393,117 @@ func TestDecodeYAMLRequestTimeout(t *testing.T) {
 		})
 	}
 }
+
+// TestHTTPScenarioToConfig checks omission versus explicit values before YAML
+// decoding: zero rates/timeouts disable limits, while empty inputs stay invalid.
+func TestHTTPScenarioToConfig(t *testing.T) {
+	mode, parameter := "http2", "search"
+	zero, workers := 0, 3
+	timeout, duration := time.Duration(0), 7*time.Second
+	tests := []struct {
+		name    string
+		change  func(*httpScenarioYAML, *HTTPScenarioConfig)
+		wantErr error
+	}{
+		{name: "defaults"},
+		{name: "overrides", change: func(raw *httpScenarioYAML, want *HTTPScenarioConfig) {
+			raw.Mode, raw.RPS, raw.Workers, raw.RequestTimeout = &mode, &zero, &workers, &timeout
+			raw.Parameter, raw.Methods, raw.Payloads = &parameter, []string{"POST"}, []string{"a&b + %"}
+			want.Cfg.Mode, want.Cfg.RPS, want.Cfg.Workers, want.Cfg.RequestTimeout = mode, zero, workers, timeout
+			want.Parameter, want.Methods, want.Payloads = parameter, []string{"POST"}, []string{"a&b + %"}
+		}},
+		{name: "empty_methods", change: func(raw *httpScenarioYAML, _ *HTTPScenarioConfig) { raw.Methods = []string{} }, wantErr: ErrMethodsRequired},
+		{name: "empty_payloads", change: func(raw *httpScenarioYAML, _ *HTTPScenarioConfig) { raw.Payloads = []string{} }, wantErr: ErrInvalidPayloads},
+		{name: "empty_parameter", change: func(raw *httpScenarioYAML, _ *HTTPScenarioConfig) { empty := ""; raw.Parameter = &empty }, wantErr: ErrParameterRequired},
+		{name: "zero_workers", change: func(raw *httpScenarioYAML, _ *HTTPScenarioConfig) { raw.Workers = &zero }, wantErr: ErrWorkersRange},
+	}
+	for _, kind := range []string{"sqli", "xss"} {
+		for _, tt := range tests {
+			t.Run(kind+"/"+tt.name, func(t *testing.T) {
+				httpRaw := &httpScenarioYAML{backgroundYAML: backgroundYAML{Target: "https://example.com/search"}}
+				want := &HTTPScenarioConfig{Cfg: Config{Target: "https://example.com/search", Mode: "http1", RPS: 10, Workers: 1, RequestTimeout: 5 * time.Second, Duration: duration, DryRun: true}, Methods: []string{"GET", "POST"}, Parameter: "q"}
+				if tt.change != nil {
+					tt.change(httpRaw, want)
+				}
+				raw := runYAML{Duration: &duration, DryRun: true, Scenario: &scenarioYAML{Type: kind, HTTP: httpRaw}}
+				got, err := raw.toConfig()
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("error = %v, want %v", err, tt.wantErr)
+				}
+				if tt.wantErr != nil {
+					if got != nil {
+						t.Fatal("invalid input returned a config")
+					}
+					return
+				}
+				if !reflect.DeepEqual(got.Scenario.HTTP, want) {
+					t.Errorf("HTTP config = %+v, want %+v", got.Scenario.HTTP, want)
+				}
+			})
+		}
+	}
+}
+
+// TestDecodeYAMLHTTPLists rejects scalar coercion and nested data in string lists
+// without copying payload contents into diagnostics.
+func TestDecodeYAMLHTTPLists(t *testing.T) {
+	for _, field := range []string{"methods", "payloads"} {
+		for _, value := range []string{"42", "true", "{secret: hidden-token}", "[hidden-token]"} {
+			t.Run(field+"/"+value, func(t *testing.T) {
+				input := "scenario:\n  type: sqli\n  http:\n    target: http://example.com/\n    " + field + ": [GET, " + value + "]\n"
+				got, err := DecodeYAML(strings.NewReader(input))
+				if got != nil || !errors.Is(err, ErrYAMLConfigBad) {
+					t.Fatalf("config=%v error=%v, want YAML error and nil config", got, err)
+				}
+				if !strings.Contains(err.Error(), "scenario.http."+field) || !strings.Contains(err.Error(), "item 1") {
+					t.Errorf("missing field/index in error: %v", err)
+				}
+				if strings.Contains(err.Error(), "hidden-token") {
+					t.Errorf("diagnostic exposed input: %v", err)
+				}
+			})
+		}
+	}
+}
+
+// TestDecodeYAMLHTTPScenarios exercises the complete decoder, including inline
+// fields, default profiles, literal strings, and explicit empty lists.
+func TestDecodeYAMLHTTPScenarios(t *testing.T) {
+	tests := []struct {
+		name, extra string
+		wantErr     error
+	}{
+		{name: "defaults"},
+		{name: "custom", extra: "    methods: [POST]\n    parameter: search\n    payloads: ['42', 'true', 'a&b + %']\n"},
+		{name: "empty_methods", extra: "    methods: []\n", wantErr: ErrMethodsRequired},
+		{name: "empty_payloads", extra: "    payloads: []\n", wantErr: ErrInvalidPayloads},
+	}
+	for _, kind := range []string{"sqli", "xss"} {
+		for _, tt := range tests {
+			t.Run(kind+"/"+tt.name, func(t *testing.T) {
+				input := "scenario:\n  type: " + kind + "\n  http:\n    target: http://example.com/search\n" + tt.extra
+				got, err := DecodeYAML(strings.NewReader(input))
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("error=%v, want %v", err, tt.wantErr)
+				}
+				if tt.wantErr != nil {
+					if got != nil {
+						t.Fatal("invalid YAML returned a config")
+					}
+					return
+				}
+				h := got.Scenario.HTTP
+				if h.Cfg.Target != "http://example.com/search" || h.Cfg.RPS != 10 || h.Cfg.Workers != 1 {
+					t.Errorf("inline settings=%+v", h.Cfg)
+				}
+				if tt.name == "defaults" {
+					if h.Parameter != "q" || !reflect.DeepEqual(h.Methods, []string{"GET", "POST"}) || h.Payloads != nil {
+						t.Errorf("defaults=%+v", h)
+					}
+				} else if h.Parameter != "search" || !reflect.DeepEqual(h.Methods, []string{"POST"}) || !reflect.DeepEqual(h.Payloads, []string{"42", "true", "a&b + %"}) {
+					t.Errorf("custom settings=%+v", h)
+				}
+			})
+		}
+	}
+}

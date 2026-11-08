@@ -10,40 +10,40 @@ import (
 	"github.com/wild-sergunys/traffic-gen/internal/config"
 )
 
-// TestParseArgsDefaults verifies that every optional flag falls back to
+// TestParseHTTPFlagsDefaults verifies that every optional flag falls back to
 // its documented default value when only --target is provided.
-func TestParseArgsDefaults(t *testing.T) {
-	cfg, err := config.ParseArgs([]string{"--target", "http://example.com"})
+func TestParseHTTPFlagsDefaults(t *testing.T) {
+	cfg, err := config.ParseRunArgs([]string{"--target", "http://example.com"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if cfg.Target != "http://example.com" {
-		t.Errorf("target = %q, want %q", cfg.Target, "http://example.com")
+	if cfg.Background.Target != "http://example.com" {
+		t.Errorf("target = %q, want %q", cfg.Background.Target, "http://example.com")
 	}
-	if cfg.Mode != "http1" {
-		t.Errorf("mode = %q, want %q", cfg.Mode, "http1")
+	if cfg.Background.Mode != "http1" {
+		t.Errorf("mode = %q, want %q", cfg.Background.Mode, "http1")
 	}
-	if cfg.RPS != 100 {
-		t.Errorf("rps = %d, want %d", cfg.RPS, 100)
+	if cfg.Background.RPS != 100 {
+		t.Errorf("rps = %d, want %d", cfg.Background.RPS, 100)
 	}
-	if cfg.RequestTimeout != 5*time.Second {
-		t.Errorf("request timeout = %v, want 5s", cfg.RequestTimeout)
+	if cfg.Background.RequestTimeout != 5*time.Second {
+		t.Errorf("request timeout = %v, want 5s", cfg.Background.RequestTimeout)
 	}
-	if cfg.Duration != 30*time.Second {
-		t.Errorf("duration = %v, want %v", cfg.Duration, 30*time.Second)
+	if cfg.Background.Duration != 30*time.Second {
+		t.Errorf("duration = %v, want %v", cfg.Background.Duration, 30*time.Second)
 	}
-	if cfg.Workers != 10 {
-		t.Errorf("workers = %d, want %d", cfg.Workers, 10)
+	if cfg.Background.Workers != 10 {
+		t.Errorf("workers = %d, want %d", cfg.Background.Workers, 10)
 	}
-	if cfg.DryRun {
-		t.Errorf("dry-run = %v, want false", cfg.DryRun)
+	if cfg.Background.DryRun {
+		t.Errorf("dry-run = %v, want false", cfg.Background.DryRun)
 	}
 }
 
-// TestParseArgsAllCustomFlags verifies that every flag is parsed and
+// TestParseHTTPFlagsAllCustomFlags verifies that every flag is parsed and
 // stored in the corresponding Config field when all are provided.
-func TestParseArgsAllCustomFlags(t *testing.T) {
+func TestParseHTTPFlagsAllCustomFlags(t *testing.T) {
 	args := []string{
 		"--target", "https://api.example.com",
 		"--mode", "http2",
@@ -54,37 +54,37 @@ func TestParseArgsAllCustomFlags(t *testing.T) {
 		"--dry-run",
 	}
 
-	cfg, err := config.ParseArgs(args)
+	cfg, err := config.ParseRunArgs(args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if cfg.Target != "https://api.example.com" {
-		t.Errorf("target = %q, want %q", cfg.Target, "https://api.example.com")
+	if cfg.Background.Target != "https://api.example.com" {
+		t.Errorf("target = %q, want %q", cfg.Background.Target, "https://api.example.com")
 	}
-	if cfg.Mode != "http2" {
-		t.Errorf("mode = %q, want %q", cfg.Mode, "http2")
+	if cfg.Background.Mode != "http2" {
+		t.Errorf("mode = %q, want %q", cfg.Background.Mode, "http2")
 	}
-	if cfg.RPS != 500 {
-		t.Errorf("rps = %d, want %d", cfg.RPS, 500)
+	if cfg.Background.RPS != 500 {
+		t.Errorf("rps = %d, want %d", cfg.Background.RPS, 500)
 	}
-	if cfg.RequestTimeout != 2*time.Second {
-		t.Errorf("request timeout = %v, want 2s", cfg.RequestTimeout)
+	if cfg.Background.RequestTimeout != 2*time.Second {
+		t.Errorf("request timeout = %v, want 2s", cfg.Background.RequestTimeout)
 	}
-	if cfg.Duration != 5*time.Minute {
-		t.Errorf("duration = %v, want %v", cfg.Duration, 5*time.Minute)
+	if cfg.Background.Duration != 5*time.Minute {
+		t.Errorf("duration = %v, want %v", cfg.Background.Duration, 5*time.Minute)
 	}
-	if cfg.Workers != 50 {
-		t.Errorf("workers = %d, want %d", cfg.Workers, 50)
+	if cfg.Background.Workers != 50 {
+		t.Errorf("workers = %d, want %d", cfg.Background.Workers, 50)
 	}
-	if !cfg.DryRun {
-		t.Errorf("dry-run = %v, want true", cfg.DryRun)
+	if !cfg.Background.DryRun {
+		t.Errorf("dry-run = %v, want true", cfg.Background.DryRun)
 	}
 }
 
-// TestParseArgsValidationErrors verifies that every invalid input is
+// TestParseHTTPFlagsValidationErrors verifies that every invalid input is
 // rejected with the expected sentinel error.
-func TestParseArgsValidationErrors(t *testing.T) {
+func TestParseHTTPFlagsValidationErrors(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    []string
@@ -112,7 +112,7 @@ func TestParseArgsValidationErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := config.ParseArgs(tt.args)
+			_, err := config.ParseRunArgs(tt.args)
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("got err = %v, want = %v", err, tt.wantErr)
 			}
@@ -120,9 +120,9 @@ func TestParseArgsValidationErrors(t *testing.T) {
 	}
 }
 
-// TestParseArgsBoundaryValues verifies that values on the edge of the
+// TestParseHTTPFlagsBoundaryValues verifies that values on the edge of the
 // accepted range pass validation without errors.
-func TestParseArgsBoundaryValues(t *testing.T) {
+func TestParseHTTPFlagsBoundaryValues(t *testing.T) {
 	tests := []struct {
 		name        string
 		args        []string
@@ -150,38 +150,38 @@ func TestParseArgsBoundaryValues(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg, err := config.ParseArgs(tt.args)
+			cfg, err := config.ParseRunArgs(tt.args)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if cfg.Workers != tt.wantWorkers {
-				t.Errorf("workers = %d, want %d", cfg.Workers, tt.wantWorkers)
+			if cfg.Background.Workers != tt.wantWorkers {
+				t.Errorf("workers = %d, want %d", cfg.Background.Workers, tt.wantWorkers)
 			}
-			if cfg.RPS != tt.wantRPS {
-				t.Errorf("rps = %d, want %d", cfg.RPS, tt.wantRPS)
+			if cfg.Background.RPS != tt.wantRPS {
+				t.Errorf("rps = %d, want %d", cfg.Background.RPS, tt.wantRPS)
 			}
 		})
 	}
 }
 
-// TestParseArgsExtraArgs verifies that positional arguments after the
+// TestParseHTTPFlagsExtraArgs verifies that positional arguments after the
 // flags are rejected instead of silently ignored.
-func TestParseArgsExtraArgs(t *testing.T) {
-	_, err := config.ParseArgs([]string{"--target", "http://x", "foo", "bar"})
+func TestParseHTTPFlagsExtraArgs(t *testing.T) {
+	_, err := config.ParseRunArgs([]string{"--target", "http://x", "foo", "bar"})
 	if !errors.Is(err, config.ErrExtraArgs) {
 		t.Errorf("got err = %v, want = %v", err, config.ErrExtraArgs)
 	}
 }
 
-// TestParseArgsHelp verifies that both short and long help flags are
+// TestParseHTTPFlagsHelp verifies that both short and long help flags are
 // translated into ErrHelpRequested so the caller can exit with status 0.
-func TestParseArgsHelp(t *testing.T) {
+func TestParseHTTPFlagsHelp(t *testing.T) {
 	for _, arg := range []string{"-h", "--help"} {
 		t.Run(arg, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := config.ParseArgs([]string{arg})
+			_, err := config.ParseRunArgs([]string{arg})
 			if !errors.Is(err, config.ErrHelpRequested) {
 				t.Errorf("got err = %v, want = %v", err, config.ErrHelpRequested)
 			}
@@ -246,7 +246,7 @@ func TestConfigString(t *testing.T) {
 }
 
 // TestConfigValidateDirect verifies that Validate can be called on a
-// manually constructed Config, without going through ParseArgs.
+// manually constructed Config, without going through command-line parsing.
 func TestConfigValidateDirect(t *testing.T) {
 	t.Run("valid config", func(t *testing.T) {
 		cfg := &config.Config{
@@ -289,7 +289,7 @@ func TestUsage(t *testing.T) {
 		t.Fatal("usage output is empty")
 	}
 
-	for _, flag := range []string{"target", "mode", "rps", "duration", "workers", "dry-run", "request-timeout", "config"} {
+	for _, flag := range []string{"target", "mode", "rps", "duration", "workers", "dry-run", "request-timeout", "config", "version", "profile"} {
 		if !strings.Contains(out, "-"+flag) {
 			t.Errorf("usage output does not mention -%s", flag)
 		}
@@ -367,6 +367,46 @@ func TestConfigTargetRedaction(t *testing.T) {
 			}
 			if cfg.Target != tt.target {
 				t.Errorf("target after Validate = %q, want %q", cfg.Target, tt.target)
+			}
+		})
+	}
+}
+
+// Invalid explicit ports are configuration errors, even in dry-run mode.
+func TestHTTPPortValidation(t *testing.T) {
+	for _, tt := range []struct {
+		target string
+		valid  bool
+	}{
+		{"http://example.com/", true},
+		{"http://example.com:1/", true},
+		{"https://example.com:65535/", true},
+		{"http://[::1]:8080/", true},
+		{"http://[::1]/", true},
+		{"http://example.com:0/", false},
+		{"http://example.com:65536/", false},
+		{"http://example.com:999999999999999999999/", false},
+		{"http://example.com:/", false},
+		{"http://[::1]:65536/", false},
+		{"http://alice:test-password@example.com:99999/", false},
+	} {
+		t.Run(tt.target, func(t *testing.T) {
+			_, err := config.ParseRunArgs([]string{"--target", tt.target, "--dry-run"})
+			if tt.valid {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if !errors.Is(err, config.ErrTargetInvalid) {
+				t.Errorf("error = %v, want invalid target", err)
+			}
+			if err != nil && strings.Contains(err.Error(), "test-password") {
+				t.Error("error exposes password")
+			}
+			input := "background:\n  target: " + tt.target + "\n"
+			if _, err := config.DecodeYAML(strings.NewReader(input)); !errors.Is(err, config.ErrTargetInvalid) {
+				t.Errorf("YAML error = %v, want invalid target", err)
 			}
 		})
 	}

@@ -193,15 +193,18 @@ func TestRunPortscan(t *testing.T) {
 // TestRunDryRun leaves the listener unaccepted so any accidental HTTP or scan
 // connection remains observable in its backlog after Run returns.
 func TestRunDryRun(t *testing.T) {
-	for _, mode := range []string{"http", "portscan", "combined"} {
+	for _, mode := range []string{"http", "web", "portscan", "combined"} {
 		t.Run(mode, func(t *testing.T) {
 			listener := listenTCP(t)
 			cfg := &config.RunConfig{Duration: 30 * time.Millisecond, DryRun: true}
 			if mode != "portscan" {
 				cfg.Background = httpConfig("http://" + listener.Addr().String())
 				cfg.Background.DryRun = false
+				if mode == "web" {
+					cfg.Background.Profile = "web"
+				}
 			}
-			if mode != "http" {
+			if mode != "http" && mode != "web" {
 				cfg.Scenario = scanConfig(listener)
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)

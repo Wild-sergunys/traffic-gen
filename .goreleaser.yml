@@ -36,6 +36,8 @@ archives:
     files:
       - LICENSE
       - README.md
+      - examples/*.yaml
+      - docs/validation-corpus.md
 
 checksum:
   name_template: 'checksums.txt'

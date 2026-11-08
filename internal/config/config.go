@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -24,6 +25,7 @@ var (
 	ErrHelpRequested      = errors.New("help requested")
 	ErrTargetRequired     = errors.New("target is required (use --target)")
 	ErrTargetInvalid      = errors.New("target must be a valid http:// or https:// URL")
+	ErrProfileInvalid     = errors.New("background profile must be simple or web")
 	ErrModeInvalid        = errors.New("mode must be one of: http1, http2, h2c")
 	ErrInvalidTargetHTTP2 = errors.New("mode http2 requires an https:// target")
 	ErrInvalidTargetH2C   = errors.New("mode h2c requires an http:// target")
@@ -48,6 +50,8 @@ var (
 type Config struct {
 	Target string
 	Mode   string
+	// Profile selects background request templates; empty means simple.
+	Profile string
 
 	// RPS is the target requests per second. 0 means no throttling.
 	RPS int
@@ -60,49 +64,16 @@ type Config struct {
 	DryRun         bool
 }
 
-// Parse reads configuration from os.Args and returns a validated Config.
-func Parse() (*Config, error) {
-	return ParseArgs(os.Args[1:])
-}
-
-// registerFlags declares legacy HTTP flags, shared by ParseArgs and
-// registerRunFlags so their defaults stay consistent.
+// registerFlags declares HTTP flags for the CLI and its help output.
 func registerFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.StringVar(&cfg.Target, "target", "", "Target URL (e.g. http://192.168.1.10)")
+	fs.StringVar(&cfg.Profile, "profile", "", "Background request profile: simple | web (default simple)")
 	fs.StringVar(&cfg.Mode, "mode", "http1", "Generation mode: http1 | http2 | h2c")
 	fs.IntVar(&cfg.RPS, "rps", 100, "Target requests per second (0 = unlimited)")
 	fs.DurationVar(&cfg.RequestTimeout, "request-timeout", 5*time.Second, "HTTP request timeout including body reads (0 = run limit only)")
 	fs.DurationVar(&cfg.Duration, "duration", 30*time.Second, "Duration of the run")
 	fs.IntVar(&cfg.Workers, "workers", 10, "Number of concurrent workers")
 	fs.BoolVar(&cfg.DryRun, "dry-run", false, "Run the pipeline without sending any request")
-}
-
-// ParseArgs reads configuration from the given arguments and returns
-// a validated Config. Callers that receive ErrHelpRequested should call
-// Usage to print help text, then exit with status 0.
-func ParseArgs(args []string) (*Config, error) {
-	fs := flag.NewFlagSet("traffic-gen", flag.ContinueOnError)
-	fs.SetOutput(io.Discard) // errors are reported by the caller
-
-	var cfg Config
-	registerFlags(fs, &cfg)
-
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil, ErrHelpRequested
-		}
-		return nil, err
-	}
-
-	if fs.NArg() > 0 {
-		return nil, fmt.Errorf("%w: %v", ErrExtraArgs, fs.Args())
-	}
-
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-
-	return &cfg, nil
 }
 
 // Usage writes the flag help text to w. Call this when ParseRunArgs
@@ -131,6 +102,25 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("%w: missing host", ErrTargetInvalid)
 	}
 
+	// An omitted port uses the scheme default; an explicit port must be usable.
+	if port := u.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("%w: port must be between 1 and 65535", ErrTargetInvalid)
+		}
+	} else if strings.HasSuffix(u.Host, ":") {
+		return fmt.Errorf("%w: explicit port cannot be empty", ErrTargetInvalid)
+	}
+
+	switch c.Profile {
+	case "", "simple":
+	case "web":
+		if _, err := url.ParseQuery(u.RawQuery); err != nil {
+			return fmt.Errorf("%w: malformed web profile query", ErrTargetInvalid)
+		}
+	default:
+		return ErrProfileInvalid
+	}
 	switch c.Mode {
 	case "http1":
 		// ok

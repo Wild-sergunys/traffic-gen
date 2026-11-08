@@ -123,3 +123,38 @@ func TestRunConfigValidatePreservesBackground(t *testing.T) {
 		t.Fatalf("baground changed: %+v, want: %+v", background, before)
 	}
 }
+
+// HTTP scenario validation rejects conflicting blocks and keeps caller settings intact.
+func TestRunHTTPScenarioValidate(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(*ScenarioConfig)
+		want   error
+	}{
+		{name: "valid"},
+		{"missing_http", func(c *ScenarioConfig) { c.HTTP = nil }, ErrInvalidHTTPScenarioConfig},
+		{"conflict_http", func(c *ScenarioConfig) { c.Portscan = &portscan.Config{} }, ErrConflictingScenarioConfig},
+		{"conflict_portscan", func(c *ScenarioConfig) { c.Type = "portscan"; c.Portscan = &portscan.Config{} }, ErrConflictingScenarioConfig},
+		{"invalid_method", func(c *ScenarioConfig) { c.HTTP.Methods = []string{"DELETE"} }, ErrInvalidMethod},
+		{"blank_parameter", func(c *ScenarioConfig) { c.HTTP.Parameter = " \t" }, ErrParameterRequired},
+		{"empty_payload", func(c *ScenarioConfig) { c.HTTP.Payloads = []string{""} }, ErrInvalidPayloads},
+		{"whitespace_payload", func(c *ScenarioConfig) { c.HTTP.Payloads = []string{" "} }, nil},
+	}
+	for _, kind := range []string{"sqli", "xss"} {
+		for _, tt := range tests {
+			t.Run(kind+"/"+tt.name, func(t *testing.T) {
+				c := &ScenarioConfig{Type: kind, HTTP: &HTTPScenarioConfig{Cfg: Config{Target: "http://example.com/", Mode: "http1", Workers: 1}, Methods: []string{"GET"}, Parameter: "q"}}
+				if tt.change != nil {
+					tt.change(c)
+				}
+				cfg := RunConfig{Duration: time.Second, Scenario: c}
+				if err := cfg.Validate(); !errors.Is(err, tt.want) {
+					t.Errorf("error = %v, want %v", err, tt.want)
+				}
+				if c.HTTP != nil && c.HTTP.Cfg.Duration != 0 {
+					t.Error("validation changed caller duration")
+				}
+			})
+		}
+	}
+}

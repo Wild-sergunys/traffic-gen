@@ -1,0 +1,9 @@
+# Deterministic normal GET/POST traffic, including punctuation and Unicode.
+# Run: ./bin/traffic-gen --config examples/web-background.yaml
+duration: 10s
+background:
+  target: http://127.0.0.1:8080/?device=7
+  profile: web
+  rps: 20
+  workers: 2
+  request_timeout: 5s

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wild-sergunys/traffic-gen/internal/config"
@@ -16,9 +17,11 @@ import (
 
 // Generator sends HTTP/1.1, HTTP/2 and h2c requests to a single target.
 type Generator struct {
-	cfg    *config.Config
-	target *url.URL
-	client *http.Client
+	cfg            *config.Config
+	target         *url.URL
+	client         *http.Client
+	profile        *requestProfile
+	backgroundNext *atomic.Uint64
 }
 
 // userAgents contains browser strings selected once per worker.
@@ -50,7 +53,7 @@ func New(cfg *config.Config) (*Generator, error) {
 		return nil, err
 	}
 
-	return &Generator{
+	g := &Generator{
 		cfg:    cfg,
 		target: u,
 		client: &http.Client{
@@ -67,13 +70,28 @@ func New(cfg *config.Config) (*Generator, error) {
 				DisableCompression: true,
 			},
 		},
-	}, nil
+	}
+	if cfg.Profile == "web" {
+		g.backgroundNext = new(atomic.Uint64)
+	}
+	return g, nil
 }
 
-// newRequest builds a GET request against cfg.Target, preserving its path
+// newRequest builds the next scenario or background request.
+// Simple background traffic uses cfg.Target, preserving its path
 // and query. With neither a path nor a query, a random path is generated
 // for each request.
 func (g *Generator) newRequest(ctx context.Context, userAgent string) (*http.Request, error) {
+	if p := g.profile; p != nil {
+		// Method changes fastest, so even short runs exercise both encodings.
+		n := p.next.Add(1) - 1
+		method := p.methods[n%uint64(len(p.methods))]
+		payload := p.payloads[(n/uint64(len(p.methods)))%uint64(len(p.payloads))]
+		return newPayloadRequest(ctx, g.target, userAgent, method, p.parameter, payload)
+	}
+	if g.backgroundNext != nil {
+		return g.newWebRequest(ctx, userAgent)
+	}
 	u := *g.target
 	if u.Path == "" && u.RawQuery == "" {
 		u.Path = randomPath()

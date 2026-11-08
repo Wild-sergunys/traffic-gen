@@ -1,0 +1,14 @@
+# Built-in SQLi attempts without background traffic.
+# Run: ./bin/traffic-gen --config examples/sqli.yaml
+duration: 10s
+scenario:
+  type: sqli
+  http:
+    target: http://127.0.0.1:8080/search?device=7
+    mode: http1
+    rps: 10
+    workers: 1
+    request_timeout: 5s
+    methods: [GET, POST]
+    parameter: q
+    # Omit payloads to use the built-in SQLi profile.

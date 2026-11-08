@@ -2,10 +2,8 @@ package metrics_test
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io"
-	"strings"
 	"testing"
 	"time"
 
@@ -103,57 +101,25 @@ func TestMetrics(t *testing.T) {
 	}
 }
 
-// TestReportCancel verifies that Report returns immediately on an already
-// cancelled context and writes nothing.
-func TestReportCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	m := newMetrics(nil)
-	got := new(bytes.Buffer)
-	want := 0
-
-	// A short interval would let the ticker fire. select picks at random
-	// when both cases are ready, so the test would fail intermittently.
-	if err := m.Report(ctx, got, 2*time.Second); err != nil {
-		t.Fatal(err)
-	}
-
-	if got.Len() != 0 {
-		t.Errorf("buffer_len = %d, want = %d", got.Len(), want)
+// Timing and cancellation are covered by runner tests; this checks the actual formatter.
+func TestWriteSnapshot(t *testing.T) {
+	m := newMetrics([]Record{{latency: 100 * time.Millisecond, nBytes: 300, statusCode: 200}})
+	for _, prefix := range []string{"", "sqli: "} {
+		var out bytes.Buffer
+		if err := m.WriteSnapshot(&out, prefix); err != nil {
+			t.Fatal(err)
+		}
+		want := prefix + "sent=1, errors=0, 2xx=1, 3xx=0, 4xx=0, 5xx=0, bytes=300, avg latency=100ms\n"
+		if out.String() != want {
+			t.Errorf("output = %q, want %q", out.String(), want)
+		}
 	}
 }
 
-// TestReportTicker verifies that Report writes a snapshot on every tick.
-func TestReportTicker(t *testing.T) {
-	m := newMetrics([]Record{{latency: 100 * time.Millisecond, nBytes: 300, statusCode: 200, err: nil}})
-	got := new(bytes.Buffer)
-	want := "sent=1, errors=0, 2xx=1, 3xx=0, 4xx=0, 5xx=0, bytes=300, avg latency=100ms\n"
-
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
-	defer cancel()
-
-	if err := m.Report(ctx, got, 20*time.Millisecond); err != nil {
-		t.Fatal(err)
-	}
-
-	// Contains instead of ==: the tick count depends on machine load, so
-	// the number of lines in the buffer cannot be predicted.
-	if !strings.Contains(got.String(), want) {
-		t.Errorf("buffer = %v, want = %v", got, want)
-	}
-}
-
-// TestReportBrokenWriter checks both the report classification and writer cause.
-func TestReportBrokenWriter(t *testing.T) {
+func TestWriteSnapshotError(t *testing.T) {
 	m := newMetrics(nil)
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	err := m.Report(ctx, brokenWriter{}, time.Millisecond)
+	err := m.WriteSnapshot(brokenWriter{}, "")
 	if !errors.Is(err, metrics.ErrWriteSnapshot) || !errors.Is(err, io.ErrClosedPipe) {
-		t.Fatalf("Report() error = %v, want snapshot and writer errors", err)
-	}
-	if ctx.Err() != nil {
-		t.Errorf("Report waited for context cancellation: %v", ctx.Err())
+		t.Fatalf("error = %v, want snapshot and writer errors", err)
 	}
 }

@@ -1,4 +1,4 @@
-// Package main starts HTTP traffic generation and port scanning from CLI flags
+// Package main starts background traffic and attack scenarios from CLI flags
 // or a YAML configuration file, with shutdown on interrupt or SIGTERM.
 package main
 
@@ -14,13 +14,27 @@ import (
 	"github.com/wild-sergunys/traffic-gen/internal/runner"
 )
 
+// Build metadata is populated by Makefile and GoReleaser through linker flags.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	cfg, err := config.ParseRunArgs(os.Args[1:])
 	if err != nil {
-		if errors.Is(err, config.ErrHelpRequested) {
+		switch {
+		case errors.Is(err, config.ErrHelpRequested):
 			config.Usage(os.Stdout)
 			os.Exit(0)
-		} else {
+		case errors.Is(err, config.ErrVersionRequested):
+			if _, err := fmt.Fprintf(os.Stdout, "traffic-gen %s (commit=%s, built=%s)\n", version, commit, date); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		default:
 			fmt.Fprintln(os.Stderr, err)
 			config.Usage(os.Stderr)
 			os.Exit(1)
