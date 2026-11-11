@@ -18,6 +18,7 @@ import (
 )
 
 // Run validates cfg, applies its common timeout, and runs the enabled tasks.
+// Terminals show a live panel; other writers receive plain-text metrics.
 // HTTP background continues after the scenario finishes. All background tasks
 // finish before final summaries are written to out. Dry-run sends no traffic.
 // Context cancellation and deadlines are normal completion. Validation failures
@@ -51,15 +52,23 @@ func Run(ctx context.Context, cfg *config.RunConfig, out io.Writer) error {
 		}
 		tasks = append(tasks, &httpTask{name: cfg.Scenario.Type, generator: g})
 	}
-	var wg sync.WaitGroup
+	var wg, reportWG sync.WaitGroup
 	var reportErr error
 	start := time.Now()
+	panel := newDashboard(out, cfg, tasks, start)
+	if panel != nil {
+		if err := panel.write(start, "RUNNING"); err != nil {
+			return fmt.Errorf("report progress: %w", err)
+		}
+	}
+	reportCtx, stopReport := context.WithCancel(ctx)
+	defer stopReport()
 	for _, task := range tasks {
 		wg.Go(func() { task.generator.Run(ctx, &task.metrics) })
 	}
-	if len(tasks) > 0 {
-		wg.Go(func() {
-			reportErr = reportHTTP(ctx, out, tasks)
+	if len(tasks) > 0 || panel != nil {
+		reportWG.Go(func() {
+			reportErr = reportProgress(reportCtx, out, tasks, panel)
 			if reportErr != nil {
 				cancel()
 			}
@@ -72,16 +81,37 @@ func Run(ctx context.Context, cfg *config.RunConfig, out io.Writer) error {
 
 	if cfg.Scenario != nil && cfg.Scenario.Type == "portscan" && !cfg.DryRun {
 		scanStarted = time.Now()
-		res, scanErr = portscan.Run(ctx, *cfg.Scenario.Portscan)
+		var onResult func(portscan.Result)
+		if panel != nil {
+			onResult = panel.scan.record
+		}
+		res, scanErr = portscan.RunWithProgress(ctx, *cfg.Scenario.Portscan, onResult)
 		// Record completion before waiting for the independent HTTP background.
 		scanFinished = time.Now()
 	}
 
-	// Wait for the reporter too, so final writes never overlap its output.
 	wg.Wait()
+	// Stop the reporter even when a scan-only run finishes before its deadline.
+	stopReport()
+	reportWG.Wait()
 	// WaitGroup also synchronizes the reporter error before reading it here.
 	if reportErr != nil {
-		return fmt.Errorf("report HTTP metrics: %w", reportErr)
+		return fmt.Errorf("report progress: %w", reportErr)
+	}
+
+	if panel != nil {
+		state := "DONE"
+		switch {
+		case errors.Is(ctx.Err(), context.Canceled):
+			state = "CANCELED"
+		case errors.Is(ctx.Err(), context.DeadlineExceeded):
+			state = "TIME LIMIT"
+		case scanErr != nil:
+			state = "ERROR"
+		}
+		if err := panel.write(time.Now(), state); err != nil {
+			return fmt.Errorf("result output error: %w", err)
+		}
 	}
 
 	if cfg.DryRun {
@@ -91,18 +121,20 @@ func Run(ctx context.Context, cfg *config.RunConfig, out io.Writer) error {
 		}
 	}
 
-	for _, task := range tasks {
-		s := task.metrics.Snapshot()
-		prefix := ""
-		if task.name != "" {
-			prefix = task.name + " "
-		}
+	if panel == nil {
+		for _, task := range tasks {
+			s := task.metrics.Snapshot()
+			prefix := ""
+			if task.name != "" {
+				prefix = task.name + " "
+			}
 
-		_, err = fmt.Fprintf(out, "%sfinal: sent=%d, errors=%d, 2xx=%v, 3xx=%v, 4xx=%v, 5xx=%v, bytes=%d, avg latency=%v, run time=%v\n",
-			prefix, s.Sent, s.Errors, s.StatusClasses[0], s.StatusClasses[1], s.StatusClasses[2], s.StatusClasses[3], s.Bytes,
-			s.AvgLatency.Round(time.Millisecond), time.Since(start))
-		if err != nil {
-			return fmt.Errorf("result output error: %w", err)
+			_, err = fmt.Fprintf(out, "%sfinal: sent=%d, errors=%d, 2xx=%v, 3xx=%v, 4xx=%v, 5xx=%v, bytes=%d, avg latency=%v, run time=%v\n",
+				prefix, s.Sent, s.Errors, s.StatusClasses[0], s.StatusClasses[1], s.StatusClasses[2], s.StatusClasses[3], s.Bytes,
+				s.AvgLatency.Round(time.Millisecond), time.Since(start))
+			if err != nil {
+				return fmt.Errorf("result output error: %w", err)
+			}
 		}
 	}
 
@@ -164,14 +196,24 @@ type httpTask struct {
 	metrics   metrics.Metrics
 }
 
-func reportHTTP(ctx context.Context, out io.Writer, tasks []*httpTask) error {
-	ticker := time.NewTicker(2 * time.Second)
+func reportProgress(ctx context.Context, out io.Writer, tasks []*httpTask, panel *dashboard) error {
+	interval := 2 * time.Second
+	if panel != nil {
+		interval = 500 * time.Millisecond
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+			if panel != nil {
+				if err := panel.write(time.Now(), "RUNNING"); err != nil {
+					return err
+				}
+				continue
+			}
 			for _, task := range tasks {
 				prefix := ""
 				if task.name != "" {

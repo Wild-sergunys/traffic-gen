@@ -287,10 +287,27 @@ time limit are normal completion, with exit status zero.
 
 ### Metrics
 
-Each enabled HTTP source prints separate metrics every two seconds and once
-at the end. Background output retains `sent=...` and `final: ...`; scenario
-output uses `sqli: ...` / `sqli final: ...` or `xss: ...` / `xss final: ...`.
-Port scan results are printed after all tasks finish. During a run,
+In an interactive terminal, a live panel refreshes twice per second. It shows
+separate rows for background and scenario traffic, request rate, completed
+attempts, errors, and average latency. HTTP progress measures elapsed time
+against the common duration; it does not measure successful requests. Port scan
+progress counts attempted ports and previews up to eight connected ports.
+
+Live `REQ/S` is completed attempts (including failures) divided by the time since
+the previous update. The final rate is the average over the whole run. Final
+states distinguish normal completion, the time limit, and cancellation. Ctrl+C
+keeps the actual progress instead of forcing it to 100%.
+
+The panel uses a compact layout in narrow windows. Resizing starts a fresh block
+to avoid overwriting terminal history. `NO_COLOR=1` disables colors while keeping
+live updates. Redirected output, `TERM=dumb`, dry-run, and terminals initially
+smaller than 40 columns or 16 rows use plain text. No terminal input mode is changed.
+
+In plain text, each enabled HTTP source prints separate metrics every two seconds
+and once at the end. Background output retains `sent=...` and `final: ...`;
+scenario output uses `sqli: ...` / `sqli final: ...` or `xss: ...` / `xss final: ...`.
+The full list of connected ports and scan timing are printed after all tasks
+finish in both output modes. During a run,
 counters are read independently, so a report may combine values from
 different instants. The final summary is read after all workers finish
 and no longer update the counters.

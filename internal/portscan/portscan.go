@@ -61,6 +61,12 @@ func probe(ctx context.Context, address string, timeout time.Duration) error {
 // Probe errors are recorded in results and do not stop the scan. Cancellation
 // returns accumulated results, including any interrupted probe, and ctx.Err().
 func Run(ctx context.Context, cfg Config) ([]Result, error) {
+	return RunWithProgress(ctx, cfg, nil)
+}
+
+// RunWithProgress is Run with an optional observer called synchronously after
+// each attempted port. The observer should return promptly to avoid slowing scans.
+func RunWithProgress(ctx context.Context, cfg Config, onResult func(Result)) ([]Result, error) {
 	var res []Result
 
 	err := cfg.Validate()
@@ -89,7 +95,11 @@ func Run(ctx context.Context, cfg Config) ([]Result, error) {
 			return res, ctx.Err()
 		}
 		err = probe(ctx, net.JoinHostPort(cfg.Host, strconv.Itoa(p)), cfg.Timeout)
-		res = append(res, Result{Port: p, Err: err})
+		result := Result{Port: p, Err: err}
+		res = append(res, result)
+		if onResult != nil {
+			onResult(result)
+		}
 	}
 
 	return res, ctx.Err()
